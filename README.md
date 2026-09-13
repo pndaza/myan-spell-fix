@@ -49,10 +49,10 @@ inline diff, copy the clean result.
 - Opens plain-text files — **ဖိုင်ဖွင့်မည်** button or drag-and-drop onto
   the editor (.txt/.text/.md; newline-normalized, non-UTF-8 files warned
   about)
-- Gemini models (Sept 2026 lineup) — **Flash Lite (latest)** is the
-  default and **3.5 Flash-Lite** the pinned stable choice (~500 free
-  requests/day per key); **3.8 Flash**, **3.7 Flash**, and **Flash
-  (latest)** are stronger proofreaders (~20 free requests/day)
+- Gemini models (Sept 2026 lineup) — **3.5 Flash-Lite** is the default and
+  **3.1 Flash-Lite** the other Lite option (~500 free requests/day per key);
+  **3.8 / 3.7 / 3.6 / 3.5 Flash** are stronger proofreaders (~20 free
+  requests/day)
 - Light / dark / system theme, Padauk webfont (self-hosted), bilingual
   Burmese-first UI
 

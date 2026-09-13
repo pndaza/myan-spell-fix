@@ -20,20 +20,20 @@ const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /** Models offered in the UI. Free-tier daily REQUEST limits on Google AI
  *  Studio (per key, Sept 2026) favor flash-lite heavily; `freeRpd` drives
- *  the pre-run request estimate warning. `latest` aliases hot-swap to the
- *  newest release of that variant; the pinned entries are predictable.
+ *  the pre-run request estimate warning. All entries are pinned releases
+ *  so behavior is predictable.
  *  See https://ai.google.dev/gemini-api/docs/rate-limits */
 export const MODELS = [
   {
-    key: "gemini-flash-lite-latest",
-    label: "Flash Lite (latest)",
-    hint: "Fast · ~500/day free",
+    key: "gemini-3.5-flash-lite",
+    label: "3.5 Flash-Lite",
+    hint: "Default · ~500/day free",
     freeRpd: 500,
   },
   {
-    key: "gemini-3.5-flash-lite",
-    label: "3.5 Flash-Lite",
-    hint: "Stable Lite · ~500/day free",
+    key: "gemini-3.1-flash-lite",
+    label: "3.1 Flash-Lite",
+    hint: "~500/day free",
     freeRpd: 500,
   },
   {
@@ -49,8 +49,14 @@ export const MODELS = [
     freeRpd: 20,
   },
   {
-    key: "gemini-flash-latest",
-    label: "Flash (latest)",
+    key: "gemini-3.6-flash",
+    label: "3.6 Flash",
+    hint: "~20/day free",
+    freeRpd: 20,
+  },
+  {
+    key: "gemini-3.5-flash",
+    label: "3.5 Flash",
     hint: "~20/day free",
     freeRpd: 20,
   },
@@ -58,7 +64,7 @@ export const MODELS = [
 
 export type ModelKey = (typeof MODELS)[number]["key"];
 
-export const DEFAULT_MODEL: ModelKey = "gemini-flash-lite-latest";
+export const DEFAULT_MODEL: ModelKey = "gemini-3.5-flash-lite";
 
 export function resolveModel(key: unknown): string {
   return (

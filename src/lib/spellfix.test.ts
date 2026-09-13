@@ -88,12 +88,12 @@ describe("fixText", () => {
 
     const r = await fixText("user-key", "မူလ", DEFAULT_MODEL);
     expect(r.corrected).toBe("ပြင်ပြီး");
-    expect(r.model).toBe("gemini-flash-lite-latest");
+    expect(r.model).toBe("gemini-3.5-flash-lite");
     expect(r.ms).toBeGreaterThanOrEqual(0);
 
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
     );
     expect(calls[0].url).not.toContain("user-key");
     const headers = calls[0].init.headers as Record<string, string>;
@@ -272,7 +272,7 @@ describe("fixText", () => {
   });
 
   it("offers only Google-AI-Studio models with flash-lite default", () => {
-    expect(MODELS[0].key).toBe("gemini-flash-lite-latest");
+    expect(MODELS[0].key).toBe("gemini-3.5-flash-lite");
     expect(MODELS.every((m) => m.key.startsWith("gemini-"))).toBe(true);
   });
 });
