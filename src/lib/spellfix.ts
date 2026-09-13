@@ -73,6 +73,24 @@ Strict rules:
 
 Respond with ONLY a JSON object of the form {"corrected": "<the corrected text>"} — no markdown fences, no explanation.`;
 
+/** Prompt for MANUAL mode: the model reports errors as wrong→correct
+ *  pairs instead of rewriting the text. The user then approves each fix
+ *  individually — the guard against hallucinated rewrites. */
+const SUGGEST_SYSTEM_PROMPT = `You are a meticulous Burmese (Myanmar language) proofreader.
+
+Find spelling and typographical errors in the user's Burmese text, including:
+- wrong or missing vowel signs, medials, and the asat (်)
+- wrong stacked consonants or wrongly split/merged syllables
+- incorrect use of က်/က််-style endings and similar letter confusions
+- punctuation errors in Burmese marks (၊ ၊)
+
+Strict rules:
+- Report ACTUAL errors only. Do not suggest style, wording, or translation changes. Do not invent words that are not in the text.
+- Each "wrong" value MUST be an exact substring copied character-for-character from the input, spanning the minimal complete word or syllable-cluster that contains the error.
+- Each "correct" value must be the corrected spelling of that same fragment, changing as little as possible.
+
+Respond with ONLY a JSON object of the form {"fixes": [{"wrong": "<exact fragment from the input>", "correct": "<corrected fragment>"}, ...]}. If the text has no errors, respond {"fixes": []}. No markdown fences, no explanation.`;
+
 /** What the model returned for one chunk, after parsing. */
 export interface FixResult {
   corrected: string;
@@ -107,7 +125,8 @@ export class ApiError extends Error {
 
 /**
  * Fix one chunk (≤ MAX_TEXT_LEN chars) through Google AI Studio, straight
- * from the browser with the user's key.
+ * from the browser with the user's key — AUTO mode: the model returns the
+ * corrected text.
  *
  * `temperature` is deliberately low (0.1): the task is transcription-grade
  * correction, not generation — faithfulness beats creativity, and a low
@@ -119,13 +138,56 @@ export async function fixText(
   modelKey: string,
   signal?: AbortSignal,
 ): Promise<FixResult> {
+  const { raw, ms } = await generate(apiKey, text, modelKey, SYSTEM_PROMPT, signal);
+  const { corrected, parseMode } = parseCorrected(raw);
+  return { corrected, model: resolveModel(modelKey), parseMode, ms };
+}
+
+/** One wrong→correct suggestion from MANUAL mode. */
+export interface Suggestion {
+  /** Exact fragment as it appears (misspelled) in the input. */
+  wrong: string;
+  /** Its corrected spelling. */
+  correct: string;
+}
+
+/** MANUAL-mode result: the model's suggestions for one chunk. */
+export interface SuggestResult {
+  fixes: Suggestion[];
+  ms: number;
+}
+
+/**
+ * Ask the model to REPORT errors as wrong→correct pairs instead of
+ * rewriting the text (MANUAL mode). Suggestions are applied only after the
+ * user approves them — and `applyFixes` only substitutes exact-substring
+ * matches, so a hallucinated fragment cannot silently change the text.
+ */
+export async function suggestFixes(
+  apiKey: string,
+  text: string,
+  modelKey: string,
+  signal?: AbortSignal,
+): Promise<SuggestResult> {
+  const { raw, ms } = await generate(apiKey, text, modelKey, SUGGEST_SYSTEM_PROMPT, signal);
+  return { fixes: parseFixes(raw), ms };
+}
+
+/** Shared Gemini generateContent round-trip: validates input size, then
+ *  returns the raw reply text. */
+async function generate(
+  apiKey: string,
+  text: string,
+  modelKey: string,
+  system: string,
+  signal?: AbortSignal,
+): Promise<{ raw: string; ms: number }> {
   if (text.trim().length === 0) {
     throw new ApiError("No text to fix.", "empty");
   }
   if (text.length > MAX_TEXT_LEN) {
     throw new ApiError(`Text too long (max ${MAX_TEXT_LEN} characters per request).`, "too_long");
   }
-
   const model = resolveModel(modelKey);
   const t0 = performance.now();
   let res: Response;
@@ -137,7 +199,7 @@ export async function fixText(
         "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
       }),
@@ -173,9 +235,95 @@ export async function fixText(
       "ai_error",
     );
   }
+  return { raw, ms: Math.round(performance.now() - t0) };
+}
 
-  const { corrected, parseMode } = parseCorrected(raw);
-  return { corrected, model, parseMode, ms: Math.round(performance.now() - t0) };
+/** Parse a MANUAL-mode reply into validated suggestions.
+ *
+ *  Same defense layers as `parseCorrected` (whole JSON → fished {...}),
+ *  plus per-entry validation: strings only, non-empty, wrong ≠ correct.
+ *  Duplicates (wrong+correct) collapse; entries are capped at 200 so a
+ *  runaway reply cannot flood the review list. A reply that yields no
+ *  valid entries reads as "no errors found" — not an error. */
+export function parseFixes(raw: string): Suggestion[] {
+  const unfenced = raw
+    .trim()
+    .replace(/^```(?:json)?\s*\n?/i, "")
+    .replace(/\n?```\s*$/i, "")
+    .trim();
+
+  let list: unknown = null;
+  const whole = tryParseJson(unfenced);
+  if (whole !== null) {
+    list = (whole as { fixes?: unknown }).fixes ?? whole;
+  } else {
+    const start = unfenced.indexOf("{");
+    const end = unfenced.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      const fished = tryParseJson(unfenced.slice(start, end + 1));
+      if (fished !== null) list = (fished as { fixes?: unknown }).fixes ?? null;
+    }
+  }
+  // Some models return a bare array despite the instructions.
+  const trimmedLeft = unfenced.trimStart();
+  if (list === null && trimmedLeft.startsWith("[")) {
+    list = tryParseJson(unfenced);
+  }
+  if (!Array.isArray(list)) return [];
+
+  const seen = new Set<string>();
+  const out: Suggestion[] = [];
+  for (const item of list) {
+    if (out.length >= 200) break;
+    if (item === null || typeof item !== "object") continue;
+    const { wrong, correct } = item as { wrong?: unknown; correct?: unknown };
+    if (typeof wrong !== "string" || typeof correct !== "string") continue;
+    if (wrong.length === 0 || wrong === correct) continue;
+    const key = `${wrong}→${correct}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ wrong, correct });
+  }
+  return out;
+}
+
+/** JSON.parse helper: null on failure (defense-layer fallthrough). */
+function tryParseJson(s: string): unknown {
+  try {
+    return JSON.parse(s) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** Outcome of applying approved suggestions. */
+export interface ApplyOutcome {
+  /** The text with all applicable fixes substituted. */
+  text: string;
+  /** How many fixes were actually substituted. */
+  applied: number;
+  /** Fixes whose `wrong` fragment no longer occurs in the text — skipped,
+   *  never force-applied. (Sequential application can consume a fragment;
+   *  conflicts surface here too.) */
+  notFound: Suggestion[];
+}
+
+/** Substitute each suggestion's `wrong` with `correct`, everywhere it
+ *  occurs. MANUAL mode's safety net: only exact-substring matches change —
+ *  the user saw exactly these fragments in the review list. */
+export function applyFixes(text: string, fixes: Suggestion[]): ApplyOutcome {
+  let out = text;
+  let applied = 0;
+  const notFound: Suggestion[] = [];
+  for (const f of fixes) {
+    if (!out.includes(f.wrong)) {
+      notFound.push(f);
+      continue;
+    }
+    out = out.replaceAll(f.wrong, f.correct);
+    applied += 1;
+  }
+  return { text: out, applied, notFound };
 }
 
 /** Map a non-2xx Gemini reply onto our error codes. */

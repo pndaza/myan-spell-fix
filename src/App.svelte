@@ -3,11 +3,14 @@
   import { diffWords, countEdits } from "./lib/diff";
   import {
     fixText,
+    suggestFixes,
+    applyFixes,
     errorMessage,
     ApiError,
     MODELS,
     DEFAULT_MODEL,
     type ModelKey,
+    type Suggestion,
   } from "./lib/spellfix";
   import { currentTheme, setTheme, nextTheme, resolveTheme, type Theme } from "./theme";
 
@@ -29,8 +32,32 @@
     "နိုင်ငံ၏ မြို့တော်မှာ နေပြည်တော်ဖစ်သည်။ " +
     "လူမျိုးပေါင်းစုံ အတူတကွ နေထိုင်ကြသည်။";
 
-  type Phase = "edit" | "fixing" | "review";
+  type Phase = "edit" | "fixing" | "suggest" | "review";
   type View = "diff" | "clean";
+  /** Fix mode: "auto" = the model rewrites the whole text (review via
+   *  diff); "manual" = the model suggests wrong→correct pairs and only
+   *  user-approved fixes are applied — the hallucination guard. */
+  type FixMode = "auto" | "manual";
+
+  /** A reviewable suggestion row: the pair plus UI state. `found` is false
+   *  when the wrong fragment does not occur in the input (hallucinated or
+   *  consumed by an earlier fix) — such rows cannot be applied. */
+  interface SugRow extends Suggestion {
+    checked: boolean;
+    /** Occurrences of `wrong` in the input text. */
+    count: number;
+    found: boolean;
+  }
+
+  function loadMode(): FixMode {
+    try {
+      const v = localStorage.getItem("myan-spell-fix:mode");
+      if (v === "auto" || v === "manual") return v;
+    } catch {
+      /* default */
+    }
+    return "auto";
+  }
 
   function loadKey(): string {
     try {
@@ -52,6 +79,7 @@
 
   let input = $state("");
   let model = $state<ModelKey>(loadModel());
+  let mode = $state<FixMode>(loadMode());
   let apiKey = $state<string>(loadKey());
   /** Key-editing panel state: draft input + whether it's shown. Shown
    *  automatically when there's no key; reopened via the header button. */
@@ -60,6 +88,7 @@
   let phase = $state<Phase>("edit");
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
+  let suggestions = $state<SugRow[]>([]);
   let error = $state<string | null>(null);
   let progress = $state({ done: 0, total: 1 });
   let elapsed = $state(0);
@@ -106,6 +135,7 @@
   $effect(() => {
     try {
       localStorage.setItem("myan-spell-fix:model", model);
+      localStorage.setItem("myan-spell-fix:mode", mode);
     } catch {
       /* ignore */
     }
@@ -151,23 +181,35 @@
     phase = "fixing";
     error = null;
     result = null;
+    suggestions = [];
     progress = { done: 0, total: parts.length };
     ctrl = new AbortController();
-    const fixed: string[] = [];
     const t0 = performance.now();
 
     try {
       // Sequential on purpose: keeps order trivially correct, reads as
       // steady progress, and stays inside Google's free-tier RPM limits.
-      for (const part of parts) {
-        const r = await fixText(apiKey.trim(), part, model, ctrl!.signal);
-        fixed.push(r.corrected);
-        progress = { done: progress.done + 1, total: parts.length };
+      if (mode === "auto") {
+        const fixed: string[] = [];
+        for (const part of parts) {
+          const r = await fixText(apiKey.trim(), part, model, ctrl!.signal);
+          fixed.push(r.corrected);
+          progress = { done: progress.done + 1, total: parts.length };
+        }
+        result = fixed.join("");
+        view = "diff";
+        phase = "review";
+      } else {
+        const all: Suggestion[] = [];
+        for (const part of parts) {
+          const r = await suggestFixes(apiKey.trim(), part, model, ctrl!.signal);
+          all.push(...r.fixes);
+          progress = { done: progress.done + 1, total: parts.length };
+        }
+        suggestions = buildRows(all, input);
+        phase = "suggest";
       }
-      result = fixed.join("");
       elapsed = Math.round(performance.now() - t0);
-      view = "diff";
-      phase = "review";
     } catch (err) {
       // A cancel returns to the editor with whatever text was already
       // there; a real error keeps the original and explains itself. An
@@ -184,6 +226,40 @@
     }
   }
 
+  /** Dedupe suggestion pairs (chunks can repeat the same misspelling) and
+   *  pre-compute each fragment's occurrence count in the FULL input — the
+   *  count the apply step will really substitute. Fragments that don't
+   *  occur at all are kept but marked un-found (hallucination guard). */
+  function buildRows(pairs: Suggestion[], text: string): SugRow[] {
+    const seen = new Set<string>();
+    const rows: SugRow[] = [];
+    for (const p of pairs) {
+      const key = `${p.wrong}→${p.correct}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const count = text.split(p.wrong).length - 1;
+      rows.push({ ...p, count, found: count > 0, checked: count > 0 });
+    }
+    return rows;
+  }
+
+  const checkedRows = $derived(
+    suggestions.filter((s) => s.checked && s.found),
+  );
+
+  function applySuggestions() {
+    const outcome = applyFixes(input, checkedRows);
+    result = outcome.text;
+    view = "diff";
+    phase = "review";
+  }
+
+  function toggleAllSuggestions() {
+    const found = suggestions.filter((s) => s.found);
+    const target = !found.every((s) => s.checked);
+    for (const s of found) s.checked = target;
+  }
+
   function cancel() {
     ctrl?.abort();
   }
@@ -191,6 +267,7 @@
   function backToEdit() {
     phase = "edit";
     result = null;
+    suggestions = [];
   }
 
   /** Feed the corrected text straight into another pass — users often run
@@ -219,7 +296,7 @@
       if (phase === "edit") runFix();
     } else if (e.key === "Escape") {
       if (phase === "fixing") cancel();
-      else if (phase === "review") backToEdit();
+      else if (phase === "review" || phase === "suggest") backToEdit();
     }
   }
 </script>
@@ -358,6 +435,24 @@
               <span class="mm">ရှင်းမည်</span>
             </button>
             <span class="grow"></span>
+            <div class="tabs" role="radiogroup" aria-label="Fix mode" title="အလိုအလျောက် — တစ်ချက်လုံး အတည်ပြုရန် မလိုအပ်ပါ · တစ်ခုချင်း — ထောက်ခံချက်တစ်ခုချင်း စစ်ပြီးမှ ပြင်ပါ">
+              <button
+                class:active={mode === "auto"}
+                onclick={() => (mode = "auto")}
+                aria-pressed={mode === "auto"}
+                title="Model rewrites the text — review via diff"
+              >
+                အလိုအလျောက်
+              </button>
+              <button
+                class:active={mode === "manual"}
+                onclick={() => (mode = "manual")}
+                aria-pressed={mode === "manual"}
+                title="Model suggests fixes — you approve each one"
+              >
+                တစ်ခုချင်း
+              </button>
+            </div>
             <button
               class="btn primary"
               onclick={runFix}
@@ -382,6 +477,71 @@
             <div class="progress" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
               <i style="width: {progressPct}%"></i>
             </div>
+          </div>
+        {/if}
+      </div>
+    {:else if phase === "suggest"}
+      <div class="card">
+        <div class="result-head">
+          <div class="stats">
+            {#if suggestions.length === 0}
+              <span class="nochange">
+                ✓ အမှားမတွေ့ပါ — စာလုံးအားလုံး မှန်ကန်ပါသည်
+              </span>
+            {:else}
+              ထောက်ခံချက် <b>{suggestions.length}</b> ခု · ရွေးထားသည်
+              <b>{checkedRows.length}</b> ခု
+            {/if}
+            <span class="ms">{elapsed} ms</span>
+          </div>
+          {#if suggestions.length > 0}
+            <button class="btn" onclick={toggleAllSuggestions}>
+              <span class="mm">အားလုံး ရွေး / ဖျက်</span>
+            </button>
+          {/if}
+        </div>
+
+        {#if suggestions.length > 0}
+          <ul class="suglist">
+            {#each suggestions as s, i (i)}
+              <li class="sug" class:dim={!s.found}>
+                <input
+                  type="checkbox"
+                  id="sug-{i}"
+                  checked={s.checked}
+                  disabled={!s.found}
+                  onchange={() => (s.checked = !s.checked)}
+                />
+                <label class="sugwords" for="sug-{i}">
+                  <span class="del">{s.wrong}</span>
+                  <span class="arrow" aria-hidden="true">→</span>
+                  <span class="add">{s.correct}</span>
+                </label>
+                {#if !s.found}
+                  <span class="badge warn" title="ဤစာလုံး မူလစာသားတွင် မတွေ့ပါ — hallucination ဖြစ်နိုင်သည်">
+                    မတွေ့ပါ
+                  </span>
+                {:else if s.count > 1}
+                  <span class="badge" title="ဤစာလုံး {s.count} နေရာတွင် ရှိသည်">×{s.count}</span>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+          <div class="bar">
+            <button class="btn primary" onclick={applySuggestions} disabled={checkedRows.length === 0}>
+              <span class="mm">ရွေးထားသည်များ ပြင်ဆင်မည်</span>
+            </button>
+            <span class="grow"></span>
+            <button class="btn" onclick={backToEdit}>
+              <span class="mm">နောက်သို့</span>
+            </button>
+          </div>
+        {:else}
+          <div class="bar">
+            <span class="grow"></span>
+            <button class="btn" onclick={backToEdit}>
+              <span class="mm">နောက်သို့</span>
+            </button>
           </div>
         {/if}
       </div>

@@ -20,9 +20,15 @@ inline diff, copy the clean result.
 
 - Fixes spelling and typographical errors in Burmese text (wrong vowel
   signs, medials, stacked consonants, asat, ၊/။ punctuation)
-- Shows **exactly what changed** — a syllable-cluster-level diff highlights
-  only the changed syllables (Myanmar script has no spaces between words, so
-  a plain word-diff would flag whole phrases)
+- **Two fix modes** (toggle above the Fix button):
+  - **အလိုအလျောက် (Auto)** — the model returns the corrected text; you
+    review every change in a syllable-cluster-level diff that highlights
+    only the changed syllables (Myanmar script has no spaces between
+    words, so a plain word-diff would flag whole phrases)
+  - **တစ်ခုချင်း (Manual)** — the model reports errors as wrong→correct
+    pairs; you check/uncheck each suggestion and only approved fixes are
+    applied. This is the hallucination guard: suggestions whose fragment
+    doesn't actually occur in your text are flagged and can't apply
 - Handles long documents: input is split at sentence (။) and clause (၊)
   boundaries into AI-sized chunks, fixed sequentially with live progress
 - Three Gemini models — **Flash Lite (latest)** is the default (~500 free
@@ -79,9 +85,11 @@ To validate a deploy without pushing: `npx wrangler deploy --dry-run`.
 
 ```
 wrangler.jsonc           static-assets config (no worker script)
-src/App.svelte           the whole UI — editor, key panel, fix, diff review
-src/lib/spellfix.ts      Gemini prompt, direct browser→Google call,
-                         error mapping, defensive JSON parsing
+src/App.svelte           the whole UI — editor, key panel, fix modes,
+                         suggestion review, diff review
+src/lib/spellfix.ts      Gemini prompts (auto rewrite + manual suggest),
+                         direct browser→Google call, error mapping,
+                         defensive JSON parsing, suggestion apply
 src/lib/diff.ts          Myanmar cluster-aware LCS diff (from just-ocr)
 src/lib/chunk.ts         sentence-boundary chunker (၊ ၊ \n, rejoin-exact)
 src/theme.ts             light/dark/system preference (from just-ocr)

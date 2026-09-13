@@ -529,6 +529,90 @@ main {
   padding: 0 2px;
 }
 
+/* suggestion review list (manual mode) */
+
+.suglist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.sug {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.sug.dim {
+  opacity: 0.55;
+}
+
+.sug input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.sugwords {
+  font-family: var(--my);
+  font-size: 16px;
+  line-height: 1.8;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.sugwords .arrow {
+  color: var(--text-faint);
+  font-family: var(--sans);
+}
+
+.sug .del {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: 3px;
+  padding: 0 3px;
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+}
+
+.sug .add {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.badge {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  flex: none;
+}
+
+.badge.warn {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+}
+
 .nochange {
   font-family: var(--my);
   color: var(--ok);
