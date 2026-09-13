@@ -586,6 +586,20 @@ main {
   padding: 0 3px;
 }
 
+/* the cursor row's fragments: accent outline on top of the on/off tint */
+.flag.cur {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* keyboard shortcut hint (suggest bar) */
+.hint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
 /* the fix list lives inside the right panel — it stretches with it
    instead of using its own fixed cap */
 .panel .suglist {
@@ -619,6 +633,15 @@ main {
 
 .sug.dim {
   opacity: 0.55;
+}
+
+/* keyboard-cursor row: left vertical indicator (inset shadow, no layout
+   shift) — mirrors the `cur` outline on this row's fragments in the text
+   panel */
+.sug.cursor {
+  border-color: var(--accent-dim);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-inset));
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .sug input[type="checkbox"] {

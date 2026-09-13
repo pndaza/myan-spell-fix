@@ -90,6 +90,10 @@
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
   let suggestions = $state<SugRow[]>([]);
+  /** Keyboard-cursor row in the suggest list (↑/↓). Its fragments carry
+   *  the `cur` highlight in the text panel and the left indicator in the
+   *  fix list. Always points at a FOUND row while one exists. */
+  let cursor = $state(0);
   let error = $state<string | null>(null);
   let progress = $state({ done: 0, total: 1 });
   let elapsed = $state(0);
@@ -120,9 +124,20 @@
   );
   const editCount = $derived(countEdits(diffSegs));
   /** Original text with flagged fragments highlighted — the LEFT panel of
-   *  manual mode's review. Live-updates as rows are checked/unchecked. */
+   *  manual mode's review. Live-updates as rows are checked/unchecked and
+   *  as the keyboard cursor moves. */
   const textSegs = $derived(
-    phase === "suggest" ? highlightText(input, suggestions) : [],
+    phase === "suggest"
+      ? highlightText(
+          input,
+          suggestions.map((s, i) => ({
+            wrong: s.wrong,
+            checked: s.checked,
+            found: s.found,
+            current: i === cursor,
+          })),
+        )
+      : [],
   );
   const progressPct = $derived(
     Math.round((progress.done / Math.max(progress.total, 1)) * 100),
@@ -156,6 +171,27 @@
     apply();
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
+  });
+
+  // Keep the cursor's fragment (text panel) and row (fix list) visible.
+  // Both panels scroll internally, so the page itself never jumps; the
+  // rect-delta scroll targets each scroller explicitly.
+  $effect(() => {
+    if (phase !== "suggest") return;
+    cursor; // track
+    requestAnimationFrame(() => {
+      const pre = document.querySelector<HTMLElement>(".panel-text");
+      const frag = pre?.querySelector<HTMLElement>(".flag.cur");
+      if (pre && frag) {
+        const delta =
+          frag.getBoundingClientRect().top -
+          pre.getBoundingClientRect().top -
+          (pre.clientHeight / 2 - frag.offsetHeight / 2);
+        pre.scrollBy({ top: delta, behavior: "smooth" });
+      }
+      const row = document.querySelector<HTMLElement>(".sug.cursor");
+      row?.scrollIntoView({ block: "nearest" });
+    });
   });
 
   function cycleTheme() {
@@ -213,6 +249,10 @@
           progress = { done: progress.done + 1, total: parts.length };
         }
         suggestions = buildRows(all, input);
+        cursor = Math.max(
+          0,
+          suggestions.findIndex((s) => s.found),
+        );
         phase = "suggest";
       }
       elapsed = Math.round(performance.now() - t0);
@@ -266,6 +306,24 @@
     for (const s of found) s.checked = target;
   }
 
+  /** Move the keyboard cursor by ±1, landing only on applicable (found)
+   *  rows — disabled hallucination rows are skipped, wrap-around. */
+  function moveCursor(delta: number) {
+    const n = suggestions.length;
+    if (n === 0) return;
+    let i = cursor;
+    for (let step = 0; step < n; step++) {
+      i = (i + delta + n) % n;
+      if (suggestions[i].found) break;
+    }
+    cursor = i;
+  }
+
+  function toggleCurrent() {
+    const s = suggestions[cursor];
+    if (s?.found) s.checked = !s.checked;
+  }
+
   function cancel() {
     ctrl?.abort();
   }
@@ -297,12 +355,32 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // Suggest-phase review shortcuts: ↑/↓ move the row cursor (its
+    // fragments light up in the text panel), Space toggles, Enter applies.
+    if (phase === "suggest") {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        moveCursor(1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        moveCursor(-1);
+      } else if (e.key === " ") {
+        e.preventDefault();
+        toggleCurrent();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (checkedRows.length > 0) applySuggestions();
+      } else if (e.key === "Escape") {
+        backToEdit();
+      }
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
       if (phase === "edit") runFix();
     } else if (e.key === "Escape") {
       if (phase === "fixing") cancel();
-      else if (phase === "review" || phase === "suggest") backToEdit();
+      else if (phase === "review") backToEdit();
     }
   }
 </script>
@@ -502,19 +580,27 @@
             <section class="panel" aria-label="မူရင်းစာသား">
               <h3 class="panel-label">မူရင်းစာသား</h3>
               <!-- single line, like the diff <pre>: newlines inside <pre> render -->
-              <pre class="panel-text">{#each textSegs as seg, i (i)}{#if seg.type === "plain"}{seg.text}{:else}<span class="flag {seg.type}">{seg.text}</span>{/if}{/each}</pre>
+              <pre class="panel-text">{#each textSegs as seg, i (i)}{#if seg.type === "plain"}{seg.text}{:else}<span class="flag {seg.type}" class:cur={seg.cur === true}>{seg.text}</span>{/if}{/each}</pre>
             </section>
             <section class="panel" aria-label="ပြင်ရန်စာလုံးများ">
               <h3 class="panel-label">ပြင်ရန်စာလုံးများ</h3>
               <ul class="suglist">
                 {#each suggestions as s, i (i)}
-                  <li class="sug" class:dim={!s.found}>
+                  <li
+                    class="sug"
+                    class:dim={!s.found}
+                    class:cursor={i === cursor}
+                    onclick={() => (cursor = i)}
+                  >
                     <input
                       type="checkbox"
                       id="sug-{i}"
                       checked={s.checked}
                       disabled={!s.found}
-                      onchange={() => (s.checked = !s.checked)}
+                      onchange={() => {
+                        cursor = i;
+                        s.checked = !s.checked;
+                      }}
                     />
                     <label class="sugwords" for="sug-{i}">
                       <span class="del">{s.wrong}</span>
@@ -537,6 +623,7 @@
             <button class="btn primary" onclick={applySuggestions} disabled={checkedRows.length === 0}>
               <span class="mm">ရွေးထားသည်များ ပြင်ဆင်မည်</span>
             </button>
+            <span class="hint">↑↓ · Space · Enter · Esc</span>
             <span class="grow"></span>
             <button class="btn" onclick={backToEdit}>
               <span class="mm">နောက်သို့</span>

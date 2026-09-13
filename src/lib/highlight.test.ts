@@ -46,4 +46,16 @@ describe("highlightText", () => {
   it("returns the whole text as plain when nothing is flagged", () => {
     expect(highlightText(TEXT, [])).toEqual([{ type: "plain", text: TEXT }]);
   });
+
+  it("marks the current (cursor) row's fragments with cur", () => {
+    const rows: FlagSource[] = [
+      { wrong: "မြနာမာ", checked: true, found: true, current: true },
+      { wrong: "ဖစ်", checked: true, found: true },
+    ];
+    const segs = highlightText(TEXT, rows);
+    const cur = segs.filter((s) => s.cur === true);
+    expect(cur).toHaveLength(2); // မြနာမာ occurs twice in TEXT
+    expect(cur.every((s) => s.text === "မြနာမာ" && s.type === "on")).toBe(true);
+    expect(segs.filter((s) => s.type === "on" && !s.cur)).toHaveLength(1); // ဖစ်
+  });
 });

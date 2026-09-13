@@ -4,10 +4,13 @@
 //! suggestion's `wrong` fragment becomes a flagged span: active (checked —
 //! will be fixed) or muted (unchecked — rejected by the user).
 
-/** One rendered piece of the highlighted text. */
+/** One rendered piece of the highlighted text. `cur` marks fragments that
+ *  belong to the keyboard-cursor's suggestion row (the one whose left
+ *  vertical indicator is lit in the fix list). */
 export interface FlagSeg {
   type: "plain" | "on" | "off";
   text: string;
+  cur?: boolean;
 }
 
 /** The fields highlightText needs from a suggestion row. */
@@ -15,12 +18,15 @@ export interface FlagSource {
   wrong: string;
   checked: boolean;
   found: boolean;
+  /** True for the row the review cursor is on. */
+  current?: boolean;
 }
 
 interface Range {
   start: number;
   end: number;
   on: boolean;
+  cur: boolean;
 }
 
 /**
@@ -39,7 +45,13 @@ function collectRanges(text: string, rows: FlagSource[]): Range[] {
     for (;;) {
       const at = text.indexOf(row.wrong, from);
       if (at === -1) break;
-      hits.push({ start: at, end: at + row.wrong.length, on: row.checked, order });
+      hits.push({
+        start: at,
+        end: at + row.wrong.length,
+        on: row.checked,
+        cur: row.current === true,
+        order,
+      });
       from = at + row.wrong.length;
     }
   });
@@ -55,7 +67,7 @@ function collectRanges(text: string, rows: FlagSource[]): Range[] {
   let lastEnd = -1;
   for (const h of hits) {
     if (h.start < lastEnd) continue;
-    out.push({ start: h.start, end: h.end, on: h.on });
+    out.push({ start: h.start, end: h.end, on: h.on, cur: h.cur });
     lastEnd = h.end;
   }
   return out;
@@ -71,7 +83,7 @@ export function highlightText(text: string, rows: FlagSource[]): FlagSeg[] {
   let pos = 0;
   for (const r of ranges) {
     if (r.start > pos) segs.push({ type: "plain", text: text.slice(pos, r.start) });
-    segs.push({ type: r.on ? "on" : "off", text: text.slice(r.start, r.end) });
+    segs.push({ type: r.on ? "on" : "off", text: text.slice(r.start, r.end), cur: r.cur || undefined });
     pos = r.end;
   }
   if (pos < text.length) segs.push({ type: "plain", text: text.slice(pos) });

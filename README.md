@@ -31,14 +31,18 @@ inline diff, copy the clean result.
     the right. Only approved fixes apply. This is the hallucination
     guard: suggestions whose fragment doesn't actually occur in your text
     are flagged and can't apply
+- Keyboard-driven review in manual mode: **↑/↓** move between suggestions
+  (the row gets a left vertical indicator and its fragments get an amber
+  outline in the text panel, auto-scrolled into view), **Space** toggles
+  the row, **Enter** applies, **Esc** backs out; **⌘/Ctrl+Enter** runs a
+  fix from the editor
 - Handles long documents: input is split at sentence (။) and clause (၊)
   boundaries into AI-sized chunks, fixed sequentially with live progress
 - Three Gemini models — **Flash Lite (latest)** is the default (~500 free
   requests/day per key), **Flash (latest)** and **Gemini 3.8 Flash** are
   stronger proofreaders (~20 free requests/day)
 - Light / dark / system theme, Padauk webfont (self-hosted), bilingual
-  Burmese-first UI, keyboard shortcuts (⌘/Ctrl+Enter to fix, Esc to
-  cancel/back)
+  Burmese-first UI
 
 ## Stack
 
