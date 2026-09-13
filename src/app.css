@@ -144,7 +144,9 @@ input:focus {
   color: var(--accent);
   font-family: var(--my);
   font-weight: 700;
-  font-size: 24px;
+  font-size: 18px; /* two Padauk glyphs (စာ) — fits the 42px box with padding */
+  line-height: 1.25;
+  white-space: nowrap;
   display: grid;
   place-items: center;
   user-select: none;

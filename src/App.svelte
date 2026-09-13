@@ -622,7 +622,7 @@
 <div class="app">
   <header class="top">
     <div class="brand">
-      <div class="logo" aria-hidden="true">ဿ</div>
+      <div class="logo" aria-hidden="true">စာ</div>
       <div>
         <h1>Myan Spell Fix</h1>
         <p class="tag">မြန်မာစာလုံးပြင် — AI ဖြင့် သတ်ပုံမှန်ကန်စေရန်</p>
