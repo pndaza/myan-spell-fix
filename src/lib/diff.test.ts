@@ -67,13 +67,23 @@ describe("diffWords", () => {
 
   it("falls back to a coarse diff above the DP cap without losing text", () => {
     // force the coarse path: enough distinct tokens on both sides to blow
-    // past MAX_DP_CELLS while sharing nothing
-    const a = Array.from({ length: 2200 }, (_, i) => `a${i}`).join(" ");
-    const b = Array.from({ length: 2200 }, (_, i) => `b${i}`).join(" ");
+    // past MAX_DP_CELLS (16M) while sharing nothing
+    const a = Array.from({ length: 4200 }, (_, i) => `a${i}`).join(" ");
+    const b = Array.from({ length: 4200 }, (_, i) => `b${i}`).join(" ");
     const segs = diffWords(a, b);
     expect(countEdits(segs)).toBe(1); // one replacement
     expect(segs.filter((s) => s.type === "del").map((s) => s.text).join(" ")).toBe(a);
     expect(segs.filter((s) => s.type === "add").map((s) => s.text).join(" ")).toBe(b);
+  });
+
+  it("a ~5k-char document with scattered edits still diffs finely", () => {
+    // 40 paragraphs, one typo each — the realistic batched-document case;
+    // must NOT hit the coarse fallback
+    const para = "မြနာမာနိုင်ငံသည် အရှေ့တောင်အာရှဒေသတွင် တည်ရှိသည်။ နိုင်ငံ၏ မြို့တော်မှာ နေပြည်တော်ဖစ်သည်။ လူမျိုးပေါင်းစုံ အတူတကွ နေထိုင်ကြသည်။";
+    const a = Array.from({ length: 40 }, () => para).join("\n");
+    const b = a.split("မြနာမာ").join("မြန်မာ");
+    expect(a.length).toBeGreaterThan(4000);
+    expect(countEdits(diffWords(a, b))).toBe(40); // one per paragraph
   });
 });
 

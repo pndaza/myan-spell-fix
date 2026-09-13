@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { mapPool, withRetries } from "./lib/batch";
   import { chunkText } from "./lib/chunk";
   import { diffWords, countEdits } from "./lib/diff";
-  import { prepareText } from "./lib/filetext";
+  import { normalizeText } from "./lib/filetext";
   import { highlightText } from "./lib/highlight";
   import {
     fixText,
@@ -13,18 +14,26 @@
     DEFAULT_MODEL,
     type ModelKey,
     type Suggestion,
+    type FixResult,
+    type SuggestResult,
   } from "./lib/spellfix";
   import { currentTheme, setTheme, nextTheme, resolveTheme, type Theme } from "./theme";
 
-  /** Client-side total-input cap. Generous (≈ 7 chunked requests) while
-   *  keeping one run well inside a flash-lite free-tier daily budget. */
-  const MAX_INPUT = 8000;
-  /** Per-request chunk size — must stay under fixText's 4000-char cap. */
+  /** Per-request chunk size — must stay under fixText's 4000-char cap.
+   *  Total input length is NOT limited: long documents just produce more
+   *  chunks, processed as concurrent batches (ebook-translator style). */
   const CHUNK = 1200;
+  /** Concurrent chunk requests — enough to keep the pipe full at the
+   *  free-tier Flash RPM limit, harmless at Flash-Lite's. */
+  const POOL = 3;
+  /** Total tries per chunk for transient errors (429 with Retry-After,
+   *  capacity, network, timeout). Key/access errors are fatal instead. */
+  const CHUNK_ATTEMPTS = 3;
+  const RETRYABLE = new Set(["rate_limited", "capacity", "network", "timeout"]);
 
   /** Plain-text file opening: accepted picker types and a size guard far
-   *  above the editor cap (read-then-truncate is fine; a giant read is
-   *  not). */
+   *  above any sensible document (length itself is not capped — batching
+   *  handles long text; this only stops a giant read). */
   const FILE_ACCEPT = ".txt,.text,.md,text/plain";
   const MAX_FILE_BYTES = 2_000_000;
 
@@ -108,6 +117,13 @@
   let cursor = $state(0);
   let error = $state<string | null>(null);
   let progress = $state({ done: 0, total: 1 });
+  /** Pause note shown during the fixing phase — set when a chunk is
+   *  backing off after a rate limit / transient failure. */
+  let pauseNote = $state<string | null>(null);
+  /** How many chunks of the last run failed (their original text was
+   *  kept). Surfaced in the review header — a partial run, not a broken
+   *  one. */
+  let partial = $state(0);
   let elapsed = $state(0);
   let themePref = $state<Theme>(currentTheme());
   let toast = $state<string | null>(null);
@@ -127,11 +143,25 @@
   const canFix = $derived(
     phase === "edit" &&
       trimmed.length > 0 &&
-      input.length <= MAX_INPUT &&
       apiKey.trim().length > 0,
   );
-  const overLimit = $derived(input.length > MAX_INPUT);
-  const nearLimit = $derived(input.length > MAX_INPUT * 0.9 && !overLimit);
+  /** Free daily requests for the selected model — the estimate below is
+   *  checked against it so users see quota trouble before spending any. */
+  const modelQuota = $derived(
+    MODELS.find((m) => m.key === model)?.freeRpd ?? 500,
+  );
+  /** Exact number of requests the next run will make (same chunker the
+   *  run uses). Debounced — chunking a whole book on every keystroke
+   *  would jank the editor. */
+  let estRequests = $state(0);
+  $effect(() => {
+    const t = input;
+    const id = setTimeout(() => {
+      estRequests = t.trim() ? chunkText(t, CHUNK).length : 0;
+    }, 250);
+    return () => clearTimeout(id);
+  });
+  const overQuota = $derived(estRequests > modelQuota);
   const diffSegs = $derived(
     result !== null ? diffWords(input, result) : [],
   );
@@ -245,46 +275,109 @@
     error = null;
     result = null;
     suggestions = [];
+    partial = 0;
+    pauseNote = null;
     progress = { done: 0, total: parts.length };
-    // This run's own controller: cancel() aborts it, and the loop below
-    // reads `ac` — not the shared `ctrl` — so a future overlapping run can
-    // never abort (or steal the cancel of) this one.
+    // This run's own controller: cancel() aborts it, and the pool below
+    // reads `ac` — not the shared `ctrl` — so runs can never abort each
+    // other. It also cuts backoff sleeps short on cancel.
     const ac = new AbortController();
     ctrl = ac;
     const t0 = performance.now();
 
+    /** One chunk, retried on transient errors. Rate limits are EXPECTED
+     *  on the free tier: honor Google's Retry-After when present, else
+     *  back off 8s/16s; never let a 429 kill the run. */
+    const runChunk = async (
+      part: string,
+    ): Promise<FixResult | SuggestResult> => {
+      const call =
+        mode === "auto"
+          ? () => fixText(apiKey.trim(), part, model, ac.signal)
+          : () => suggestFixes(apiKey.trim(), part, model, ac.signal);
+      return withRetries<FixResult | SuggestResult>(call, {
+        attempts: CHUNK_ATTEMPTS,
+        retryIf: (err) => err instanceof ApiError && RETRYABLE.has(err.code),
+        delayMs: (attempt, err) => {
+          const e = err as ApiError;
+          if (e.code === "rate_limited") {
+            return Math.min(e.retryAfterSec ? e.retryAfterSec * 1000 : 8000 * attempt, 120_000);
+          }
+          return 2000 * attempt;
+        },
+        onRetry: (attempt, err, ms) => {
+          pauseNote =
+            err instanceof ApiError && err.code === "rate_limited"
+              ? `quota ကန့်သတ်ချက် — ${Math.round(ms / 1000)} စက္ကန့် စောင့်ပြီး ထပ်စမ်းနေသည် (${attempt}/${CHUNK_ATTEMPTS - 1})…`
+              : `အနည်းငယ် နှေးနေပါသည် — ထပ်စမ်းနေသည် (${attempt}/${CHUNK_ATTEMPTS - 1})…`;
+        },
+        signal: ac.signal,
+      });
+    };
+
     try {
-      // Sequential on purpose: keeps order trivially correct, reads as
-      // steady progress, and stays inside Google's free-tier RPM limits.
-      if (mode === "auto") {
-        const fixed: string[] = [];
-        for (const part of parts) {
-          const r = await fixText(apiKey.trim(), part, model, ac.signal);
-          fixed.push(r.corrected);
+      const outcome = await mapPool(
+        parts,
+        POOL,
+        async (part) => {
+          const r = await runChunk(part);
           progress = { done: progress.done + 1, total: parts.length };
+          return r;
+        },
+        // key/access errors are futile to retry on the next chunk — stop
+        // the whole run so the user can fix the cause first
+        (err) =>
+          err instanceof ApiError &&
+          (err.code === "invalid_api_key" || err.code === "forbidden"),
+      );
+      pauseNote = null;
+
+      const allFailed = outcome.failed.length === parts.length;
+      if (allFailed) {
+        // nothing succeeded — show the real error, keep the editor's text
+        error = errorMessage(outcome.lastError);
+        if (
+          outcome.lastError instanceof ApiError &&
+          outcome.lastError.code === "invalid_api_key"
+        ) {
+          openKeyPanel();
         }
-        result = fixed.join("");
-        view = "diff";
-        phase = "review";
+        phase = "edit";
       } else {
-        const all: Suggestion[] = [];
-        for (const part of parts) {
-          const r = await suggestFixes(apiKey.trim(), part, model, ac.signal);
-          all.push(...r.fixes);
-          progress = { done: progress.done + 1, total: parts.length };
+        partial = outcome.failed.length;
+        if (mode === "auto") {
+          // failed chunks keep their original text — a partial fix, not a
+          // broken one (failed spots stay visible in the diff view)
+          result = parts
+            .map((p, i) => {
+              const r = outcome.results[i];
+              return r && "corrected" in r ? r.corrected : p;
+            })
+            .join("");
+          view = "diff";
+          phase = "review";
+        } else {
+          const all: Suggestion[] = [];
+          for (const r of outcome.results) {
+            if (r && "fixes" in r) all.push(...r.fixes);
+          }
+          suggestions = buildRows(all, input);
+          cursor = Math.max(
+            0,
+            suggestions.findIndex((s) => s.found),
+          );
+          phase = "suggest";
         }
-        suggestions = buildRows(all, input);
-        cursor = Math.max(
-          0,
-          suggestions.findIndex((s) => s.found),
-        );
-        phase = "suggest";
+        if (partial > 0) {
+          showToast(
+            `${partial} အပိုင်း မအောင်မြင်ပါ — မူလစာသားအတိုင်း ထားခဲ့သည် (${partial} chunk(s) failed — original kept)`,
+          );
+        }
       }
       elapsed = Math.round(performance.now() - t0);
     } catch (err) {
-      // A cancel returns to the editor with whatever text was already
-      // there; a real error keeps the original and explains itself. An
-      // invalid key reopens the key panel so it can be fixed in place.
+      // fatal: a cancel returns to the editor quietly; a key/access error
+      // explains itself and (for keys) reopens the panel in place.
       if (!(err instanceof Error && err.name === "AbortError")) {
         error = errorMessage(err);
         if (err instanceof ApiError && err.code === "invalid_api_key") {
@@ -392,13 +485,9 @@
       showToast("ဖိုင် ဖွင့်၍ မရပါ — Could not read the file");
       return;
     }
-    const { text, truncated } = prepareText(raw, MAX_INPUT);
-    input = text;
+    input = normalizeText(raw);
     if (raw.includes("\uFFFD")) {
       showToast("UTF-8 မဟုတ်သော ဖိုင် ဖြစ်နိုင်သည် — စာလုံးပျက်နေနိုင်သည် (File may not be UTF-8)");
-    } else if (truncated) {
-      const n = MAX_INPUT.toLocaleString("en-US");
-      showToast(`ပထမ ${n} လုံးသာ ထည့်ပြီးပါပြီ — Loaded the first ${n} characters`);
     } else {
       showToast(`ဖွင့်ပြီးပါပြီ — ${file.name}`);
     }
@@ -438,6 +527,8 @@
     phase = "edit";
     result = null;
     suggestions = [];
+    partial = 0;
+    pauseNote = null;
   }
 
   /** Feed the corrected text straight into another pass — users often run
@@ -449,6 +540,7 @@
     input = result;
     result = null;
     error = null;
+    partial = 0;
     phase = "edit";
     await runFix();
   }
@@ -667,8 +759,14 @@
             ondrop={onDrop}
           ></textarea>
           <div class="bar">
-            <span class="count" class:warn={nearLimit} class:over={overLimit}>
-              {input.length} / {MAX_INPUT}
+            <span
+              class="count"
+              class:warn={overQuota}
+              title={overQuota
+                ? `ရွေးထားသော model ၏ နေ့စဉ်အခမဲ့ quota (${modelQuota}) ထက် ပိုနိုင်သည် — အခြား model သို့ ပြောင်းကြည့်ပါ`
+                : `≈ ${estRequests} request — ${modelQuota}/day free on this model`}
+            >
+              {input.length.toLocaleString("en-US")} လုံး · ≈{estRequests} request
             </span>
             <input
               type="file"
@@ -717,6 +815,9 @@
                 <span class="mm">ရပ်မည်</span>
               </button>
             </div>
+            {#if pauseNote}
+              <div class="pause-note">{pauseNote}</div>
+            {/if}
             <div class="progress" role="progressbar" aria-label="စစ်ဆေးမှု တိုးတက်မှု" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
               <i style="width: {progressPct}%"></i>
             </div>
@@ -734,6 +835,11 @@
             {:else}
               ထောက်ခံချက် <b>{suggestions.length}</b> ခု · ရွေးထားသည်
               <b>{checkedRows.length}</b> ခု
+            {/if}
+            {#if partial > 0}
+              <span class="badge warn" title={`${partial} အပိုင်း စစ်ဆေး၍ မရပါ — မူလစာသားအတိုင်း ထားခဲ့သည်`}>
+                {partial} အပိုင်း ကျန်
+              </span>
             {/if}
             <span class="ms">{elapsed} ms</span>
           </div>
@@ -819,6 +925,11 @@
               </span>
             {:else}
               ပြင်ဆင်ချက် <b>{editCount}</b> ခု
+            {/if}
+            {#if partial > 0}
+              <span class="badge warn" title={`${partial} အပိုင်း စစ်ဆေး၍ မရပါ — မူလစာသားအတိုင်း ထားခဲ့သည် (failed chunks kept their original text)`}>
+                {partial} အပိုင်း ကျန်
+              </span>
             {/if}
             <span class="ms">{elapsed} ms</span>
           </div>

@@ -319,10 +319,6 @@ main {
   color: var(--accent-dim);
 }
 
-.count.over {
-  color: var(--danger);
-}
-
 /* progress */
 
 .fixing {
@@ -347,6 +343,17 @@ main {
   border-radius: 2px;
   background: var(--bg-inset);
   overflow: hidden;
+}
+
+/* shown while a chunk backs off after a rate limit / transient failure */
+.pause-note {
+  font-family: var(--my);
+  font-size: 13px;
+  color: var(--accent-dim);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent-dim) 30%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
 }
 
 .progress i {

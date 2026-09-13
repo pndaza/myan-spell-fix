@@ -19,23 +19,40 @@
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /** Models offered in the UI. Free-tier daily REQUEST limits on Google AI
- *  Studio (per key) favor flash-lite heavily; see
- *  https://ai.google.dev/gemini-api/docs/rate-limits */
+ *  Studio (per key, Sept 2026) favor flash-lite heavily; `freeRpd` drives
+ *  the pre-run request estimate warning. `latest` aliases hot-swap to the
+ *  newest release of that variant; the pinned entries are predictable.
+ *  See https://ai.google.dev/gemini-api/docs/rate-limits */
 export const MODELS = [
   {
     key: "gemini-flash-lite-latest",
     label: "Flash Lite (latest)",
     hint: "Fast · ~500/day free",
+    freeRpd: 500,
+  },
+  {
+    key: "gemini-3.5-flash-lite",
+    label: "3.5 Flash-Lite",
+    hint: "Stable Lite · ~500/day free",
+    freeRpd: 500,
+  },
+  {
+    key: "gemini-3.8-flash",
+    label: "3.8 Flash",
+    hint: "Best · ~20/day free",
+    freeRpd: 20,
+  },
+  {
+    key: "gemini-3.7-flash",
+    label: "3.7 Flash",
+    hint: "~20/day free",
+    freeRpd: 20,
   },
   {
     key: "gemini-flash-latest",
     label: "Flash (latest)",
-    hint: "Better proofreader · ~20/day free",
-  },
-  {
-    key: "gemini-3.8-flash",
-    label: "Gemini 3.8 Flash",
-    hint: "Best · ~20/day free",
+    hint: "~20/day free",
+    freeRpd: 20,
   },
 ] as const;
 
@@ -109,15 +126,23 @@ interface GeminiResponse {
     finishReason?: string;
   }>;
   promptFeedback?: { blockReason?: string };
-  error?: { code?: number; message?: string; status?: string };
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+    details?: unknown[];
+  };
 }
 
-/** Error with a machine-readable code the UI maps to a friendly message. */
+/** Error with a machine-readable code the UI maps to a friendly message.
+ *  `retryAfterSec` carries Google's Retry-After hint on 429s (if present)
+ *  so the batch runner can pace itself instead of guessing. */
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly code: string,
     readonly status = 0,
+    readonly retryAfterSec?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -399,7 +424,12 @@ export function applyFixes(text: string, fixes: Suggestion[]): ApplyOutcome {
 function mapGoogleError(status: number, body: GeminiResponse): ApiError {
   const msg = body.error?.message ?? `HTTP ${status}`;
   if (status === 429) {
-    return new ApiError("Google AI Studio quota/rate limit reached.", "rate_limited", status);
+    return new ApiError(
+      "Google AI Studio quota/rate limit reached.",
+      "rate_limited",
+      status,
+      parseRetryAfterSec(body),
+    );
   }
   if (status === 401) {
     return new ApiError("The API key is invalid or lacks permission.", "invalid_api_key", status);
@@ -419,6 +449,24 @@ function mapGoogleError(status: number, body: GeminiResponse): ApiError {
     return new ApiError("Google AI Studio is busy — retry shortly.", "capacity", status);
   }
   return new ApiError(msg, "ai_error", status);
+}
+
+/** Google sends its Retry-After hint in error.details as a RetryInfo
+ *  object with retryDelay: "42s". Returns undefined when absent — the
+ *  caller falls back to its own backoff. */
+function parseRetryAfterSec(body: GeminiResponse): number | undefined {
+  const details = body.error?.details;
+  if (!Array.isArray(details)) return undefined;
+  for (const d of details) {
+    if (d !== null && typeof d === "object") {
+      const delay = (d as { retryDelay?: unknown }).retryDelay;
+      if (typeof delay === "string") {
+        const m = /^([\d.]+)s$/.exec(delay);
+        if (m) return Math.ceil(parseFloat(m[1]));
+      }
+    }
+  }
+  return undefined;
 }
 
 /** Extract the corrected text from the model's raw reply.

@@ -54,10 +54,11 @@ function tokenize(text: string): string[] {
   return out;
 }
 
-/** Upper bound on DP-table cells (n·m). Above it, fall back to a coarse
- *  whole-region diff rather than allocating a table that could freeze the
- *  tab (the app's 8000-char cap can produce ~8000 tokens per side). */
-const MAX_DP_CELLS = 4_000_000;
+/** Upper bound on DP-table cells (n·m) — ~16M cells ≈ 130 MB, comfortably
+ *  interactive for documents up to ~8k chars. Above it, fall back to a
+ *  coarse whole-region diff rather than allocating a table that could
+ *  freeze the tab (batched input can now be arbitrarily long). */
+const MAX_DP_CELLS = 16_000_000;
 
 /**
  * Word-level diff of `a` (original) against `b` (corrected). Adjacent

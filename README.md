@@ -36,14 +36,23 @@ inline diff, copy the clean result.
   outline in the text panel, auto-scrolled into view), **Space** toggles
   the row, **Enter** applies, **Esc** backs out; **⌘/Ctrl+Enter** runs a
   fix from the editor
-- Handles long documents: input is split at sentence (။) and clause (၊)
-  boundaries into AI-sized chunks, fixed sequentially with live progress
+- Handles long documents with **no input cap**: text is split at sentence
+  (။) and clause (၊) boundaries into AI-sized chunks, processed as
+  concurrent batches (3 at a time) with live progress. The editor shows
+  the exact request estimate (≈ N requests) and warns when it exceeds the
+  selected model's free daily quota
+- Free-tier friendly by design: rate limits (429) are retried with
+  Google's Retry-After hint and backoff — they never kill a run. A chunk
+  that still fails keeps its original text; the review header shows how
+  many were skipped ("N အပိုင်း ကျန်"). Cancel (Esc or ရပ်မည်) works
+  mid-batch
 - Opens plain-text files — **ဖိုင်ဖွင့်မည်** button or drag-and-drop onto
-  the editor (.txt/.text/.md; newline-normalized, capped at 8,000 chars,
-  non-UTF-8 files warned about)
-- Three Gemini models — **Flash Lite (latest)** is the default (~500 free
-  requests/day per key), **Flash (latest)** and **Gemini 3.8 Flash** are
-  stronger proofreaders (~20 free requests/day)
+  the editor (.txt/.text/.md; newline-normalized, non-UTF-8 files warned
+  about)
+- Gemini models (Sept 2026 lineup) — **Flash Lite (latest)** is the
+  default and **3.5 Flash-Lite** the pinned stable choice (~500 free
+  requests/day per key); **3.8 Flash**, **3.7 Flash**, and **Flash
+  (latest)** are stronger proofreaders (~20 free requests/day)
 - Light / dark / system theme, Padauk webfont (self-hosted), bilingual
   Burmese-first UI
 
@@ -102,6 +111,7 @@ src/lib/spellfix.ts      Gemini prompts (auto rewrite + manual suggest),
                          defensive JSON parsing, suggestion apply
 src/lib/diff.ts          Myanmar cluster-aware LCS diff (from just-ocr)
 src/lib/chunk.ts         sentence-boundary chunker (၊ ၊ \n, rejoin-exact)
+src/lib/batch.ts         concurrent batch pool + retry/backoff helpers
 src/lib/highlight.ts     flagged-fragment segments for manual mode's text
                          panel (overlap rules, cursor marking)
 src/theme.ts             light/dark/system preference (from just-ocr)
