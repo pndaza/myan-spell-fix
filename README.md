@@ -58,13 +58,20 @@ npm test           # vitest — no key or network needed (Gemini is mocked)
 
 ## Build & deploy
 
+**Automatic:** every push to `main` deploys itself — GitHub Actions runs
+the tests, builds, and runs `wrangler deploy` (`.github/workflows/deploy.yml`,
+configured with the `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` repo
+secrets).
+
+**Manual** (from this checkout):
+
 ```sh
 npx wrangler login   # one-time
 npm run deploy       # vite build + wrangler deploy
 ```
 
-That's the whole setup — no secrets to configure (users bring their own
-keys). Deployed to `https://myan-spell-fix.<your-subdomain>.workers.dev`.
+That's the whole setup — no secrets to configure on Cloudflare (users bring
+their own keys). Deployed to `https://myan-spell-fix.<your-subdomain>.workers.dev`.
 
 To validate a deploy without pushing: `npx wrangler deploy --dry-run`.
 
