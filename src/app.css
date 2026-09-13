@@ -110,14 +110,14 @@ input:focus {
 
 /* ── shell ─────────────────────────────────────────────────────────── */
 
+/* full-bleed shell: the app stretches to the viewport with proportional
+   gutters — no centered column (matches just-ocr's full-width shell) */
 .app {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 0 20px;
   width: 100%;
+  padding: 0 clamp(20px, 4vw, 56px);
 }
 
 .top {
