@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="my">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Myan Spell Fix — မြန်မာစာလုံးပြင်</title>
+    <meta
+      name="description"
+      content="Burmese spelling correction powered by AI — paste Burmese text, see every fix, copy the clean result."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // Resolve the stored theme preference before first paint to avoid a
+      // flash of the wrong palette. Mirrors src/theme.ts's resolution rules:
+      // stored "light"|"dark" wins, otherwise follow the OS, default dark.
+      (function () {
+        try {
+          var pref = localStorage.getItem("myan-spell-fix:theme");
+          var resolved =
+            pref === "light" || pref === "dark"
+              ? pref
+              : window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          document.documentElement.dataset.theme = resolved;
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

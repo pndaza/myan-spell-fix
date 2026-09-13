@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "myan-spell-fix",
+  // Set to today's date when deploying for the first time.
+  "compatibility_date": "2026-09-01",
+  // The Worker script — invoked first for /api/*; every other path falls
+  // through to the static assets (the built frontend) below.
+  "main": "./worker/index.ts",
+  "assets": {
+    // Populated automatically by @cloudflare/vite-plugin from the client
+    // build output — only routing config is set here.
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // The AI provider is Google AI Studio (Gemini), called over HTTPS from
+  // the worker — no Cloudflare AI binding. The API key is a secret:
+  //   npx wrangler secret put GEMINI_API_KEY
+  "observability": {
+    "enabled": true
+  }
+}
