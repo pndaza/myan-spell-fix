@@ -1,6 +1,7 @@
 <script lang="ts">
   import { chunkText } from "./lib/chunk";
   import { diffWords, countEdits } from "./lib/diff";
+  import { prepareText } from "./lib/filetext";
   import { highlightText } from "./lib/highlight";
   import {
     fixText,
@@ -20,6 +21,12 @@
   const MAX_INPUT = 8000;
   /** Per-request chunk size — must stay under fixText's 4000-char cap. */
   const CHUNK = 1200;
+
+  /** Plain-text file opening: accepted picker types and a size guard far
+   *  above the editor cap (read-then-truncate is fine; a giant read is
+   *  not). */
+  const FILE_ACCEPT = ".txt,.text,.md,text/plain";
+  const MAX_FILE_BYTES = 2_000_000;
 
   /** localStorage key for the user's own Google AI Studio API key. The key
    *  is stored ONLY in the browser — it never goes anywhere except Google's
@@ -353,6 +360,80 @@
     ctrl?.abort();
   }
 
+  /** ── plain-text file input (button + drag-and-drop) ─────────────── */
+
+  let fileInput = $state<HTMLInputElement | undefined>(undefined);
+  /** Editor drag-over highlight. dragenter/leave fire per child element,
+   *  so a counter — not a boolean toggle — keeps the state stable. */
+  let dragging = $state(false);
+  let dragDepth = 0;
+
+  function looksTextual(file: File): boolean {
+    if (file.type === "" || file.type.startsWith("text/")) return true;
+    return /\.(txt|text|md)$/i.test(file.name);
+  }
+
+  /** Read a .txt-style file into the editor: newline-normalized, capped at
+   *  MAX_INPUT (surrogate-safe), with clear toasts for the awkward cases
+   *  (non-UTF-8 bytes decode to U+FFFD and show as broken syllables). */
+  async function loadTextFile(file: File) {
+    if (!looksTextual(file)) {
+      showToast("စာသားဖိုင်သာ ဖွင့်နိုင်ပါသည် (.txt) — Only plain-text files are supported");
+      return;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      showToast("ဖိုင် ကြီးလွန်းပါသည် — File too large");
+      return;
+    }
+    let raw: string;
+    try {
+      raw = await file.text();
+    } catch {
+      showToast("ဖိုင် ဖွင့်၍ မရပါ — Could not read the file");
+      return;
+    }
+    const { text, truncated } = prepareText(raw, MAX_INPUT);
+    input = text;
+    if (raw.includes("\uFFFD")) {
+      showToast("UTF-8 မဟုတ်သော ဖိုင် ဖြစ်နိုင်သည် — စာလုံးပျက်နေနိုင်သည် (File may not be UTF-8)");
+    } else if (truncated) {
+      const n = MAX_INPUT.toLocaleString("en-US");
+      showToast(`ပထမ ${n} လုံးသာ ထည့်ပြီးပါပြီ — Loaded the first ${n} characters`);
+    } else {
+      showToast(`ဖွင့်ပြီးပါပြီ — ${file.name}`);
+    }
+  }
+
+  function onPickFile(e: Event) {
+    const input_ = e.currentTarget as HTMLInputElement;
+    const file = input_.files?.[0];
+    if (file) void loadTextFile(file);
+    input_.value = ""; // allow re-picking the same file
+  }
+
+  function onDragEnter(e: DragEvent) {
+    e.preventDefault();
+    dragDepth++;
+    dragging = true;
+  }
+
+  function onDragLeave() {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dragging = false;
+  }
+
+  function onDragOver(e: DragEvent) {
+    e.preventDefault(); // required to allow a drop
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    dragDepth = 0;
+    dragging = false;
+    const file = e.dataTransfer?.files?.[0];
+    if (file) void loadTextFile(file);
+  }
+
   function backToEdit() {
     phase = "edit";
     result = null;
@@ -575,15 +656,34 @@
         {#if phase === "edit"}
           <textarea
             class="editor"
+            class:dragover={dragging}
             bind:value={input}
-            placeholder="မြန်မာစာ ရိုက်ထည့်ပါ သို့မဟုတ် ကူးထည့်ပါ…"
+            placeholder="မြန်မာစာ ရိုက်ထည့်ပါ၊ ကူးထည့်ပါ သို့မဟုတ် .txt ဖိုင်ကို ဤနေရာတွင် ချထားပါ…"
             spellcheck="false"
             aria-label="မြန်မာစာသား ထည့်ရန်"
+            ondragenter={onDragEnter}
+            ondragleave={onDragLeave}
+            ondragover={onDragOver}
+            ondrop={onDrop}
           ></textarea>
           <div class="bar">
             <span class="count" class:warn={nearLimit} class:over={overLimit}>
               {input.length} / {MAX_INPUT}
             </span>
+            <input
+              type="file"
+              accept={FILE_ACCEPT}
+              hidden
+              onchange={onPickFile}
+              bind:this={fileInput}
+            />
+            <button
+              class="btn"
+              onclick={() => fileInput?.click()}
+              title="Open a plain-text file (.txt)"
+            >
+              <span class="mm">ဖိုင်ဖွင့်မည်</span>
+            </button>
             <button class="btn" onclick={() => { input = SAMPLE; }} title="Load sample text">
               <span class="mm">နမူနာ</span>
             </button>

@@ -38,6 +38,9 @@ inline diff, copy the clean result.
   fix from the editor
 - Handles long documents: input is split at sentence (။) and clause (၊)
   boundaries into AI-sized chunks, fixed sequentially with live progress
+- Opens plain-text files — **ဖိုင်ဖွင့်မည်** button or drag-and-drop onto
+  the editor (.txt/.text/.md; newline-normalized, capped at 8,000 chars,
+  non-UTF-8 files warned about)
 - Three Gemini models — **Flash Lite (latest)** is the default (~500 free
   requests/day per key), **Flash (latest)** and **Gemini 3.8 Flash** are
   stronger proofreaders (~20 free requests/day)

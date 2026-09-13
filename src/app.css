@@ -286,6 +286,13 @@ main {
   border-color: var(--accent-dim);
 }
 
+/* drag-over highlight while dropping a plain-text file */
+.editor.dragover {
+  border-color: var(--accent);
+  border-style: dashed;
+  background: var(--accent-soft);
+}
+
 .editor::placeholder {
   color: var(--text-faint);
 }
