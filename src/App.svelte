@@ -1,6 +1,7 @@
 <script lang="ts">
   import { chunkText } from "./lib/chunk";
   import { diffWords, countEdits } from "./lib/diff";
+  import { highlightText } from "./lib/highlight";
   import {
     fixText,
     suggestFixes,
@@ -118,6 +119,11 @@
     result !== null ? diffWords(input, result) : [],
   );
   const editCount = $derived(countEdits(diffSegs));
+  /** Original text with flagged fragments highlighted — the LEFT panel of
+   *  manual mode's review. Live-updates as rows are checked/unchecked. */
+  const textSegs = $derived(
+    phase === "suggest" ? highlightText(input, suggestions) : [],
+  );
   const progressPct = $derived(
     Math.round((progress.done / Math.max(progress.total, 1)) * 100),
   );
@@ -314,6 +320,14 @@
     </div>
     <div class="controls">
       <select
+        bind:value={mode}
+        title="ပြင်ဆင်မှုစနစ် — Auto: တစ်ချက်လုံး ပြင်ပြီး diff ဖြင့် စစ်ပါ · Manual: ထောက်ခံချက်တစ်ခုချင်း ရွေးပြီးမှ ပြင်ပါ"
+        aria-label="Fix mode"
+      >
+        <option value="auto">အလိုအလျောက် (Auto)</option>
+        <option value="manual">တစ်ခုချင်း (Manual)</option>
+      </select>
+      <select
         bind:value={model}
         title="AI model — Gemini (Google AI Studio). Flash Lite အမြန်ဆုံး၊ Flash ပိုမှန်ကန်သည်"
         aria-label="AI model"
@@ -435,24 +449,6 @@
               <span class="mm">ရှင်းမည်</span>
             </button>
             <span class="grow"></span>
-            <div class="tabs" role="radiogroup" aria-label="Fix mode" title="အလိုအလျောက် — တစ်ချက်လုံး အတည်ပြုရန် မလိုအပ်ပါ · တစ်ခုချင်း — ထောက်ခံချက်တစ်ခုချင်း စစ်ပြီးမှ ပြင်ပါ">
-              <button
-                class:active={mode === "auto"}
-                onclick={() => (mode = "auto")}
-                aria-pressed={mode === "auto"}
-                title="Model rewrites the text — review via diff"
-              >
-                အလိုအလျောက်
-              </button>
-              <button
-                class:active={mode === "manual"}
-                onclick={() => (mode = "manual")}
-                aria-pressed={mode === "manual"}
-                title="Model suggests fixes — you approve each one"
-              >
-                တစ်ခုချင်း
-              </button>
-            </div>
             <button
               class="btn primary"
               onclick={runFix}
@@ -502,31 +498,41 @@
         </div>
 
         {#if suggestions.length > 0}
-          <ul class="suglist">
-            {#each suggestions as s, i (i)}
-              <li class="sug" class:dim={!s.found}>
-                <input
-                  type="checkbox"
-                  id="sug-{i}"
-                  checked={s.checked}
-                  disabled={!s.found}
-                  onchange={() => (s.checked = !s.checked)}
-                />
-                <label class="sugwords" for="sug-{i}">
-                  <span class="del">{s.wrong}</span>
-                  <span class="arrow" aria-hidden="true">→</span>
-                  <span class="add">{s.correct}</span>
-                </label>
-                {#if !s.found}
-                  <span class="badge warn" title="ဤစာလုံး မူလစာသားတွင် မတွေ့ပါ — hallucination ဖြစ်နိုင်သည်">
-                    မတွေ့ပါ
-                  </span>
-                {:else if s.count > 1}
-                  <span class="badge" title="ဤစာလုံး {s.count} နေရာတွင် ရှိသည်">×{s.count}</span>
-                {/if}
-              </li>
-            {/each}
-          </ul>
+          <div class="panels">
+            <section class="panel" aria-label="မူရင်းစာသား">
+              <h3 class="panel-label">မူရင်းစာသား</h3>
+              <!-- single line, like the diff <pre>: newlines inside <pre> render -->
+              <pre class="panel-text">{#each textSegs as seg, i (i)}{#if seg.type === "plain"}{seg.text}{:else}<span class="flag {seg.type}">{seg.text}</span>{/if}{/each}</pre>
+            </section>
+            <section class="panel" aria-label="ပြင်ရန်စာလုံးများ">
+              <h3 class="panel-label">ပြင်ရန်စာလုံးများ</h3>
+              <ul class="suglist">
+                {#each suggestions as s, i (i)}
+                  <li class="sug" class:dim={!s.found}>
+                    <input
+                      type="checkbox"
+                      id="sug-{i}"
+                      checked={s.checked}
+                      disabled={!s.found}
+                      onchange={() => (s.checked = !s.checked)}
+                    />
+                    <label class="sugwords" for="sug-{i}">
+                      <span class="del">{s.wrong}</span>
+                      <span class="arrow" aria-hidden="true">→</span>
+                      <span class="add">{s.correct}</span>
+                    </label>
+                    {#if !s.found}
+                      <span class="badge warn" title="ဤစာလုံး မူလစာသားတွင် မတွေ့ပါ — hallucination ဖြစ်နိုင်သည်">
+                        မတွေ့ပါ
+                      </span>
+                    {:else if s.count > 1}
+                      <span class="badge" title="ဤစာလုံး {s.count} နေရာတွင် ရှိသည်">×{s.count}</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          </div>
           <div class="bar">
             <button class="btn primary" onclick={applySuggestions} disabled={checkedRows.length === 0}>
               <span class="mm">ရွေးထားသည်များ ပြင်ဆင်မည်</span>

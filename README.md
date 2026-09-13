@@ -20,15 +20,17 @@ inline diff, copy the clean result.
 
 - Fixes spelling and typographical errors in Burmese text (wrong vowel
   signs, medials, stacked consonants, asat, ၊/။ punctuation)
-- **Two fix modes** (toggle above the Fix button):
+- **Two fix modes** (dropdown in the header, beside the model selector):
   - **အလိုအလျောက် (Auto)** — the model returns the corrected text; you
     review every change in a syllable-cluster-level diff that highlights
     only the changed syllables (Myanmar script has no spaces between
     words, so a plain word-diff would flag whole phrases)
-  - **တစ်ခုချင်း (Manual)** — the model reports errors as wrong→correct
-    pairs; you check/uncheck each suggestion and only approved fixes are
-    applied. This is the hallucination guard: suggestions whose fragment
-    doesn't actually occur in your text are flagged and can't apply
+  - **တစ်ခုချင်း (Manual)** — a two-panel review (just-ocr style): the
+    original text on the left with every flagged fragment highlighted
+    (red = will fix, muted = unchecked), the wrong→correct checklist on
+    the right. Only approved fixes apply. This is the hallucination
+    guard: suggestions whose fragment doesn't actually occur in your text
+    are flagged and can't apply
 - Handles long documents: input is split at sentence (။) and clause (၊)
   boundaries into AI-sized chunks, fixed sequentially with live progress
 - Three Gemini models — **Flash Lite (latest)** is the default (~500 free

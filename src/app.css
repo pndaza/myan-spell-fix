@@ -529,6 +529,71 @@ main {
   padding: 0 2px;
 }
 
+/* suggestion review — two panels (just-ocr style: text | fix list) */
+
+.panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.panel-label {
+  margin: 0;
+  font-family: var(--my);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.panel-text {
+  font-family: var(--my);
+  font-size: 16px;
+  line-height: 1.95;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 120px;
+  max-height: 52vh;
+}
+
+/* flagged fragments in the original text: red = will be fixed,
+   muted = flagged but the user left it unchecked */
+.flag.on {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.flag.off {
+  color: var(--text-dim);
+  background: var(--surface);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+/* the fix list lives inside the right panel — it stretches with it
+   instead of using its own fixed cap */
+.panel .suglist {
+  flex: 1;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
 /* suggestion review list (manual mode) */
 
 .suglist {
@@ -658,6 +723,12 @@ footer {
 }
 
 /* ── responsive & a11y ─────────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  .panels {
+    grid-template-columns: 1fr;
+  }
+}
 
 @media (max-width: 620px) {
   .top {
