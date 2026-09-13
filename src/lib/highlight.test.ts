@@ -58,4 +58,29 @@ describe("highlightText", () => {
     expect(cur.every((s) => s.text === "မြနာမာ" && s.type === "on")).toBe(true);
     expect(segs.filter((s) => s.type === "on" && !s.cur)).toHaveLength(1); // ဖစ်
   });
+
+  it("never hangs on an empty fragment, even if a caller forgets to filter", () => {
+    const segs = highlightText(TEXT, [{ wrong: "", checked: true, found: true }]);
+    expect(segs).toEqual([{ type: "plain", text: TEXT }]);
+  });
+
+  it("flags fragments containing a newline", () => {
+    const text = "မြနာမာ\nမြနာမာ";
+    const segs = highlightText(text, [row("မြနာမာ")]);
+    expect(segs.filter((s) => s.type === "on")).toHaveLength(2);
+    expect(segs.map((s) => s.text).join("")).toBe(text);
+  });
+
+  it("lights the covering winner when the cursor row loses every overlap", () => {
+    // the current row's "ဖစ်" sits inside the longer "ဖစ်သည်" — the
+    // cursor must still be visible in the text panel
+    const rows: FlagSource[] = [
+      { wrong: "ဖစ်", checked: true, found: true, current: true },
+      { wrong: "ဖစ်သည်", checked: true, found: true },
+    ];
+    const segs = highlightText("ဖစ်သည်", rows);
+    const cur = segs.filter((s) => s.cur === true);
+    expect(cur).toHaveLength(1);
+    expect(cur[0].text).toBe("ဖစ်သည်");
+  });
 });

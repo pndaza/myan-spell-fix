@@ -83,9 +83,14 @@
   let mode = $state<FixMode>(loadMode());
   let apiKey = $state<string>(loadKey());
   /** Key-editing panel state: draft input + whether it's shown. Shown
-   *  automatically when there's no key; reopened via the header button. */
+   *  automatically when there's no key (until dismissed); reopened via the
+   *  header button. */
   let keyDraft = $state("");
   let editingKey = $state(false);
+  /** Set when the user explicitly closes the auto-opened key panel —
+   *  first-time visitors can decline to enter a key and still use the
+   *  editor; the panel stops reopening until they ask for it. */
+  let keyPanelDismissed = $state(false);
   let phase = $state<Phase>("edit");
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
@@ -102,9 +107,10 @@
   let ctrl: AbortController | null = null;
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // open the key panel on first visit when no key is stored
+  // open the key panel on first visit when no key is stored — until the
+  // user explicitly dismisses it
   $effect(() => {
-    if (!apiKey) {
+    if (!apiKey && !keyPanelDismissed) {
       keyDraft = "";
       editingKey = true;
     }
@@ -175,11 +181,12 @@
 
   // Keep the cursor's fragment (text panel) and row (fix list) visible.
   // Both panels scroll internally, so the page itself never jumps; the
-  // rect-delta scroll targets each scroller explicitly.
+  // rect-delta scroll targets each scroller explicitly. The queued frame
+  // is cancelled on cleanup so rapid ↑/↓ don't stack smooth-scrolls.
   $effect(() => {
     if (phase !== "suggest") return;
     cursor; // track
-    requestAnimationFrame(() => {
+    const raf = requestAnimationFrame(() => {
       const pre = document.querySelector<HTMLElement>(".panel-text");
       const frag = pre?.querySelector<HTMLElement>(".flag.cur");
       if (pre && frag) {
@@ -192,6 +199,7 @@
       const row = document.querySelector<HTMLElement>(".sug.cursor");
       row?.scrollIntoView({ block: "nearest" });
     });
+    return () => cancelAnimationFrame(raf);
   });
 
   function cycleTheme() {
@@ -200,7 +208,13 @@
 
   function openKeyPanel() {
     keyDraft = apiKey;
+    keyPanelDismissed = false;
     editingKey = true;
+  }
+
+  function closeKeyPanel() {
+    keyPanelDismissed = true;
+    editingKey = false;
   }
 
   function commitKey() {
@@ -225,7 +239,11 @@
     result = null;
     suggestions = [];
     progress = { done: 0, total: parts.length };
-    ctrl = new AbortController();
+    // This run's own controller: cancel() aborts it, and the loop below
+    // reads `ac` — not the shared `ctrl` — so a future overlapping run can
+    // never abort (or steal the cancel of) this one.
+    const ac = new AbortController();
+    ctrl = ac;
     const t0 = performance.now();
 
     try {
@@ -234,7 +252,7 @@
       if (mode === "auto") {
         const fixed: string[] = [];
         for (const part of parts) {
-          const r = await fixText(apiKey.trim(), part, model, ctrl!.signal);
+          const r = await fixText(apiKey.trim(), part, model, ac.signal);
           fixed.push(r.corrected);
           progress = { done: progress.done + 1, total: parts.length };
         }
@@ -244,7 +262,7 @@
       } else {
         const all: Suggestion[] = [];
         for (const part of parts) {
-          const r = await suggestFixes(apiKey.trim(), part, model, ctrl!.signal);
+          const r = await suggestFixes(apiKey.trim(), part, model, ac.signal);
           all.push(...r.fixes);
           progress = { done: progress.done + 1, total: parts.length };
         }
@@ -295,6 +313,13 @@
 
   function applySuggestions() {
     const outcome = applyFixes(input, checkedRows);
+    // Sequential application can consume a fragment an earlier fix rewrote;
+    // those approved-but-skipped fixes must not vanish silently.
+    if (outcome.notFound.length > 0) {
+      showToast(
+        `ရွေးထားသည် ${outcome.notFound.length} ခု မတွေ့တော့ပါ — ${outcome.notFound.length} checked fix(es) no longer matched and were skipped`,
+      );
+    }
     result = outcome.text;
     view = "diff";
     phase = "review";
@@ -336,11 +361,14 @@
 
   /** Feed the corrected text straight into another pass — users often run
    *  a second check to confirm the fix (or catch remaining issues with the
-   *  other model). */
+   *  other model). Returns to the edit phase first: runFix is guarded by
+   *  canFix, which is only true there. */
   async function fixAgain() {
     if (result === null) return;
     input = result;
     result = null;
+    error = null;
+    phase = "edit";
     await runFix();
   }
 
@@ -350,7 +378,29 @@
       await navigator.clipboard.writeText(result);
       showToast("ကူးယူပြီးပါပြီ — Copied");
     } catch {
-      showToast("ကူးယူမည် မအောင်မြင်ပါ — Copy failed");
+      // fallback for browsers/contexts without the async clipboard API
+      if (legacyCopy(result)) {
+        showToast("ကူးယူပြီးပါပြီ — Copied");
+      } else {
+        showToast("ကူးယူမည် မအောင်မြင်ပါ — Copy failed");
+      }
+    }
+  }
+
+  function legacyCopy(text: string): boolean {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
     }
   }
 
@@ -358,6 +408,16 @@
     // Suggest-phase review shortcuts: ↑/↓ move the row cursor (its
     // fragments light up in the text panel), Space toggles, Enter applies.
     if (phase === "suggest") {
+      if (e.key === "Escape") {
+        backToEdit();
+        return;
+      }
+      // Native keys win inside interactive controls: arrows for the
+      // header selects, Space/Enter for a focused button or checkbox.
+      // (After a run, focus is typically back on <body>, where the
+      // shortcuts apply.)
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("button, select, input, textarea, a[href]")) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
         moveCursor(1);
@@ -370,8 +430,6 @@
       } else if (e.key === "Enter") {
         e.preventDefault();
         if (checkedRows.length > 0) applySuggestions();
-      } else if (e.key === "Escape") {
-        backToEdit();
       }
       return;
     }
@@ -381,6 +439,7 @@
     } else if (e.key === "Escape") {
       if (phase === "fixing") cancel();
       else if (phase === "review") backToEdit();
+      else if (phase === "edit" && editingKey) closeKeyPanel();
     }
   }
 </script>
@@ -421,23 +480,23 @@
         title={apiKey ? "API key settings" : "API key ထည့်ရန် — Add your API key"}
         aria-label="API key settings"
       >
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="7.5" cy="15.5" r="4.5" />
           <path d="m10.7 12.3 8.3-8.3m0 0h-4.5m4.5 0v4.5" />
         </svg>
       </button>
-      <button class="btn icon" onclick={cycleTheme} title={themePref === "light" ? "Light" : themePref === "dark" ? "Dark" : "System"}>
+      <button class="btn icon" onclick={cycleTheme} title={themePref === "light" ? "Light" : themePref === "dark" ? "Dark" : "System"} aria-label={`Theme: ${themePref}`}>
         {#if themePref === "light"}
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <circle cx="12" cy="12" r="4" />
             <path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
           </svg>
         {:else if themePref === "dark"}
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
           </svg>
         {:else}
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <circle cx="12" cy="12" r="9" />
             <path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none" />
           </svg>
@@ -490,11 +549,9 @@
               <span class="mm">ဖျက်မည်</span>
             </button>
           {/if}
-          {#if apiKey}
-            <button class="btn" onclick={() => (editingKey = false)} title="Close">
-              ✕
-            </button>
-          {/if}
+          <button class="btn" onclick={closeKeyPanel} title="Close">
+            ✕
+          </button>
         </div>
         <p class="keynote">
           Key ကို သင့် browser ထဲတွင်သာ သိမ်းဆည်းပါသည် — မည်သည့်ဆာဗာသို့မှ
@@ -560,7 +617,7 @@
                 <span class="mm">ရပ်မည်</span>
               </button>
             </div>
-            <div class="progress" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
+            <div class="progress" role="progressbar" aria-label="စစ်ဆေးမှု တိုးတက်မှု" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
               <i style="width: {progressPct}%"></i>
             </div>
           </div>
@@ -598,11 +655,13 @@
               <h3 class="panel-label">ပြင်ရန်စာလုံးများ</h3>
               <ul class="suglist">
                 {#each suggestions as s, i (i)}
+                  <!-- no li-level click: the words are a <label> for the
+                       checkbox (toggle + move cursor), keeping the row
+                       keyboard-accessible through the checkbox itself -->
                   <li
                     class="sug"
                     class:dim={!s.found}
                     class:cursor={i === cursor}
-                    onclick={() => (cursor = i)}
                   >
                     <input
                       type="checkbox"
@@ -668,6 +727,8 @@
               class:active={view === "diff"}
               onclick={() => (view = "diff")}
               role="tab"
+              id="tab-diff"
+              aria-controls="result-panel"
               aria-selected={view === "diff"}
             >
               ကွာခြားချက်
@@ -676,6 +737,8 @@
               class:active={view === "clean"}
               onclick={() => (view = "clean")}
               role="tab"
+              id="tab-clean"
+              aria-controls="result-panel"
               aria-selected={view === "clean"}
             >
               စာသား
@@ -685,7 +748,7 @@
 
         <!-- The each/if must stay on one line: inside <pre>, Svelte preserves
              whitespace, so any formatting newline would render as a gap. -->
-        <pre class="out">{#if view === "diff"}{#each diffSegs as seg, i (i)}{#if seg.type === "same"}{seg.text}{:else if seg.type === "del"}<span class="del">{seg.text}</span>{:else}<span class="add">{seg.text}</span>{/if}{/each}{:else}{result}{/if}</pre>
+        <pre class="out" id="result-panel" aria-label="ရလဒ် — result">{#if view === "diff"}{#each diffSegs as seg, i (i)}{#if seg.type === "same"}{seg.text}{:else if seg.type === "del"}<span class="del">{seg.text}</span>{:else}<span class="add">{seg.text}</span>{/if}{/each}{:else}{result}{/if}</pre>
 
         <div class="bar">
           <button class="btn primary" onclick={copyResult}>

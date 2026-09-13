@@ -40,7 +40,40 @@ describe("diffWords", () => {
 
   it("diffs mixed Burmese + English text", () => {
     const segs = diffWords("Google ကို ရှာပါ", "Google ကို‌ ရှာပါ");
-    expect(countEdits(segs)).toBeLessThanOrEqual(2);
+    expect(countEdits(segs)).toBe(1);
+  });
+
+  it("handles empty inputs", () => {
+    expect(diffWords("", "")).toEqual([]);
+    const onlyAdd = diffWords("", "က");
+    expect(countEdits(onlyAdd)).toBe(1);
+    expect(onlyAdd.map((s) => s.text).join("")).toBe("က");
+    const onlyDel = diffWords("က", "");
+    expect(countEdits(onlyDel)).toBe(1);
+    expect(onlyDel.map((s) => s.text).join("")).toBe("က");
+  });
+
+  it("trims shared context: an edit late in a long text is still localized", () => {
+    const head = "မြန်မာ".repeat(50);
+    const a = head + "ဖစ်သည်။";
+    const b = head + "ဖြစ်သည်။";
+    const segs = diffWords(a, b);
+    expect(countEdits(segs)).toBe(1);
+    // the unchanged head+tail collapses into merged same-runs, not a
+    // token-by-token blow-up
+    const same = segs.filter((s) => s.type === "same").map((s) => s.text).join("");
+    expect(same).toBe(head + "စ်သည်။"); // only the ဖ→ဖြ syllable differs
+  });
+
+  it("falls back to a coarse diff above the DP cap without losing text", () => {
+    // force the coarse path: enough distinct tokens on both sides to blow
+    // past MAX_DP_CELLS while sharing nothing
+    const a = Array.from({ length: 2200 }, (_, i) => `a${i}`).join(" ");
+    const b = Array.from({ length: 2200 }, (_, i) => `b${i}`).join(" ");
+    const segs = diffWords(a, b);
+    expect(countEdits(segs)).toBe(1); // one replacement
+    expect(segs.filter((s) => s.type === "del").map((s) => s.text).join(" ")).toBe(a);
+    expect(segs.filter((s) => s.type === "add").map((s) => s.text).join(" ")).toBe(b);
   });
 });
 

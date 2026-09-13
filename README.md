@@ -62,10 +62,11 @@ npm install
 npm run dev        # vite dev server — paste your key in the app's UI
 ```
 
-## Test
+## Test & type-check
 
 ```sh
 npm test           # vitest — no key or network needed (Gemini is mocked)
+npm run check      # svelte-check — TypeScript + Svelte diagnostics
 ```
 
 ## Build & deploy
@@ -98,7 +99,10 @@ src/lib/spellfix.ts      Gemini prompts (auto rewrite + manual suggest),
                          defensive JSON parsing, suggestion apply
 src/lib/diff.ts          Myanmar cluster-aware LCS diff (from just-ocr)
 src/lib/chunk.ts         sentence-boundary chunker (၊ ၊ \n, rejoin-exact)
+src/lib/highlight.ts     flagged-fragment segments for manual mode's text
+                         panel (overlap rules, cursor marking)
 src/theme.ts             light/dark/system preference (from just-ocr)
+src/lib/*.test.ts        unit tests (parsing, chunking, diff, highlight)
 ```
 
 ## Credits

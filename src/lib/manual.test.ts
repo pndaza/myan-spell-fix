@@ -35,6 +35,17 @@ describe("parseFixes", () => {
     ]);
   });
 
+  it("fishes a bare array out of surrounding prose", () => {
+    const raw = 'Sure! [{"wrong": "က", "correct": "ခ"}] hope this helps';
+    expect(parseFixes(raw)).toEqual([{ wrong: "က", correct: "ခ" }]);
+  });
+
+  it("accepts a single bare fix object", () => {
+    expect(parseFixes('{"wrong": "က", "correct": "ခ"}')).toEqual([
+      { wrong: "က", correct: "ခ" },
+    ]);
+  });
+
   it("drops invalid entries without losing the valid ones", () => {
     const raw = JSON.stringify({
       fixes: [
@@ -123,5 +134,19 @@ describe("applyFixes", () => {
     expect(out.applied).toBe(1);
     expect(out.text).toBe("ရှိသည်");
     expect(out.notFound).toEqual([fixes[1]]);
+  });
+
+  it("is total on its own: an empty wrong fragment is skipped, never inserted", () => {
+    const out = applyFixes("abc", [{ wrong: "", correct: "X" }]);
+    expect(out.text).toBe("abc");
+    expect(out.applied).toBe(0);
+    expect(out.notFound).toEqual([{ wrong: "", correct: "X" }]);
+  });
+
+  it("is total on its own: wrong === correct is a no-op, not applied", () => {
+    const out = applyFixes("abc", [{ wrong: "b", correct: "b" }]);
+    expect(out.text).toBe("abc");
+    expect(out.applied).toBe(0);
+    expect(out.notFound).toEqual([{ wrong: "b", correct: "b" }]);
   });
 });

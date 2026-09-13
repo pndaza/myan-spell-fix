@@ -48,4 +48,37 @@ describe("chunkText", () => {
     expect(chunks.every((c) => c.length <= 200)).toBe(true);
     expect(chunks.length).toBeGreaterThanOrEqual(3);
   });
+
+  it("hard-split never cuts a surrogate pair in half", () => {
+    const blob = "😀".repeat(10); // 20 code units, no break points
+    const chunks = chunkText(blob, 3);
+    expect(chunks.join("")).toBe(blob);
+    // every chunk is a whole number of 😀 pairs (no lone surrogates)
+    for (const c of chunks) expect(c.length % 2).toBe(0);
+  });
+
+  it("splits on the ၊ clause mark when sentences are still too long", () => {
+    // sentence-sized runs joined by ၊ such that ။-splitting alone can't
+    // get under max
+    const clauses = ["ကခဂဃငစဆဇညဏတထပဒနဖဗမယရလဝသဟဠအ", "ကခဂဃငစဆဇညဏတထပဒနဖဗမယရလဝသဟဠအ", "ကခဂဃငစဆဇညဏတထပဒနဖဗမယရလဝသဟဠအ"];
+    const text = `${clauses[0]}၊${clauses[1]}၊${clauses[2]}။`;
+    const chunks = chunkText(text, clauses[0].length + 2);
+    expect(chunks.join("")).toBe(text);
+    expect(chunks.length).toBeGreaterThan(1);
+    // ၊ trails its clause
+    expect(chunks[0].endsWith("၊")).toBe(true);
+  });
+
+  it("handles separator-only and leading-separator input", () => {
+    expect(chunkText("။၊\n").join("")).toBe("။၊\n");
+    const lead = "\n" + SENT.repeat(20);
+    const chunks = chunkText(lead, 100);
+    expect(chunks.join("")).toBe(lead);
+    for (const c of chunks) expect(c.length).toBeLessThanOrEqual(101);
+  });
+
+  it("clamps a nonsensical max instead of hanging", () => {
+    expect(chunkText("abc", 0).join("")).toBe("abc");
+    expect(chunkText("abc", -5).join("")).toBe("abc");
+  });
 });

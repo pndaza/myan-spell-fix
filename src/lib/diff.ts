@@ -54,28 +54,24 @@ function tokenize(text: string): string[] {
   return out;
 }
 
+/** Upper bound on DP-table cells (n·m). Above it, fall back to a coarse
+ *  whole-region diff rather than allocating a table that could freeze the
+ *  tab (the app's 8000-char cap can produce ~8000 tokens per side). */
+const MAX_DP_CELLS = 4_000_000;
+
 /**
  * Word-level diff of `a` (original) against `b` (corrected). Adjacent
  * same-type segments are merged so the result renders compactly.
+ *
+ * Cost scales with the EDITED region, not the document: identical input
+ * returns immediately, and common heads/tails are trimmed before the
+ * quadratic DP — so the common "model returned the text unchanged" case is
+ * linear even at the app's input cap.
  */
 export function diffWords(a: string, b: string): DiffSeg[] {
+  if (a === b) return a === "" ? [] : [{ type: "same", text: a }];
   const at = tokenize(a);
   const bt = tokenize(b);
-  const n = at.length;
-  const m = bt.length;
-
-  // dp[i][j] = LCS length of at[i..] vs bt[j..]
-  const dp: number[][] = Array.from({ length: n + 1 }, () =>
-    new Array<number>(m + 1).fill(0),
-  );
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      dp[i][j] =
-        at[i] === bt[j]
-          ? dp[i + 1][j + 1] + 1
-          : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
 
   const segs: DiffSeg[] = [];
   const push = (type: DiffSeg["type"], text: string) => {
@@ -83,23 +79,60 @@ export function diffWords(a: string, b: string): DiffSeg[] {
     if (last && last.type === type) last.text += text;
     else segs.push({ type, text });
   };
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (at[i] === bt[j]) {
-      push("same", at[i]);
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      push("del", at[i]);
-      i++;
-    } else {
-      push("add", bt[j]);
-      j++;
-    }
+
+  // trim the identical head and tail — only the middle is worth a DP table
+  let lo = 0;
+  while (lo < at.length && lo < bt.length && at[lo] === bt[lo]) lo++;
+  let ha = at.length;
+  let hb = bt.length;
+  while (ha > lo && hb > lo && at[ha - 1] === bt[hb - 1]) {
+    ha--;
+    hb--;
   }
-  while (i < n) push("del", at[i++]);
-  while (j < m) push("add", bt[j++]);
+  if (lo > 0) push("same", at.slice(0, lo).join(""));
+  const tail = ha < at.length ? at.slice(ha).join("") : "";
+
+  const midA = at.slice(lo, ha);
+  const midB = bt.slice(lo, hb);
+  const n = midA.length;
+  const m = midB.length;
+
+  if (n * m > MAX_DP_CELLS) {
+    // coarse fallback: too different to diff finely — show one replacement
+    if (n > 0) push("del", midA.join(""));
+    if (m > 0) push("add", midB.join(""));
+  } else {
+    // dp[i][j] = LCS length of midA[i..] vs midB[j..]
+    const dp: number[][] = Array.from({ length: n + 1 }, () =>
+      new Array<number>(m + 1).fill(0),
+    );
+    for (let i = n - 1; i >= 0; i--) {
+      for (let j = m - 1; j >= 0; j--) {
+        dp[i][j] =
+          midA[i] === midB[j]
+            ? dp[i + 1][j + 1] + 1
+            : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < n && j < m) {
+      if (midA[i] === midB[j]) {
+        push("same", midA[i]);
+        i++;
+        j++;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+        push("del", midA[i]);
+        i++;
+      } else {
+        push("add", midB[j]);
+        j++;
+      }
+    }
+    while (i < n) push("del", midA[i++]);
+    while (j < m) push("add", midB[j++]);
+  }
+  if (tail) push("same", tail);
   return segs;
 }
 
@@ -111,12 +144,21 @@ export function diffWords(a: string, b: string): DiffSeg[] {
  */
 export function diffEdits(a: string, b: string): DiffSeg[] {
   const words = diffWords(a, b);
+  // index of the last non-same segment — answers "is another edit after i?"
+  // in O(1) instead of rescanning the tail per same-run
+  let lastChange = -1;
+  for (let i = words.length - 1; i >= 0; i--) {
+    if (words[i].type !== "same") {
+      lastChange = i;
+      break;
+    }
+  }
   const out: DiffSeg[] = [];
   for (let i = 0; i < words.length; i++) {
     const seg = words[i];
     if (seg.type === "same") {
       if (!seg.text.trim() || out.length === 0) continue;
-      const hasNext = words.slice(i + 1).some((w) => w.type !== "same");
+      const hasNext = i < lastChange;
       if (hasNext && out[out.length - 1].type !== "gap") {
         out.push({ type: "gap", text: "…" });
       }

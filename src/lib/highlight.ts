@@ -40,7 +40,9 @@ interface Range {
 function collectRanges(text: string, rows: FlagSource[]): Range[] {
   const hits: Array<Range & { order: number }> = [];
   rows.forEach((row, order) => {
-    if (!row.found) return;
+    // guard by contract, not by caller discipline: an empty `wrong` matches
+    // at every index and would loop forever below
+    if (!row.found || row.wrong.length === 0) return;
     let from = 0;
     for (;;) {
       const at = text.indexOf(row.wrong, from);
@@ -65,10 +67,24 @@ function collectRanges(text: string, rows: FlagSource[]): Range[] {
 
   const out: Range[] = [];
   let lastEnd = -1;
+  const lostCur: number[] = [];
   for (const h of hits) {
-    if (h.start < lastEnd) continue;
+    if (h.start < lastEnd) {
+      if (h.cur) lostCur.push(h.start);
+      continue;
+    }
     out.push({ start: h.start, end: h.end, on: h.on, cur: h.cur });
     lastEnd = h.end;
+  }
+  // If EVERY fragment of the cursor's row lost the overlap rule (e.g. the
+  // current row's "ဖစ်" sits inside another row's "ဖစ်သည်"), the cursor
+  // would move in the fix list with nothing lighting up in the text panel.
+  // Light the winning range covering the same spot instead.
+  if (lostCur.length > 0 && !out.some((r) => r.cur)) {
+    for (const start of lostCur) {
+      const cover = out.find((r) => r.start <= start && start < r.end);
+      if (cover) cover.cur = true;
+    }
   }
   return out;
 }

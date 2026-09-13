@@ -44,6 +44,7 @@ const COMMA = "\\u104A";
  * input; a single unbreakable run longer than `max` is hard-split.
  */
 export function chunkText(text: string, max = 1200): string[] {
+  max = Math.max(1, Math.floor(max));
   if (text.length === 0) return [];
   if (text.length <= max) return [text];
 
@@ -77,10 +78,23 @@ export function chunkText(text: string, max = 1200): string[] {
   }
 
   // 3. hard-split anything still over (no punctuation at all). Rare;
-  //    correctness over elegance.
+  //    correctness over elegance. Boundaries are UTF-16 code units, so a
+  //    cut landing between a surrogate pair is nudged to keep the pair
+  //    together — a lone surrogate would corrupt astral characters (emoji)
+  //    across the API round trip. Chunks may therefore run one char over
+  //    `max`, which stays far below the server-side cap.
   const out: string[] = [];
   for (const p of merged) {
-    for (let i = 0; i < p.length; i += max) out.push(p.slice(i, i + max));
+    let i = 0;
+    while (i < p.length) {
+      let end = Math.min(i + max, p.length);
+      if (end < p.length) {
+        const prev = p.charCodeAt(end - 1);
+        if (prev >= 0xd800 && prev <= 0xdbff) end += 1;
+      }
+      out.push(p.slice(i, end));
+      i = end;
+    }
   }
   return out;
 }
