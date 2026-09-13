@@ -4,17 +4,23 @@
   import {
     fixText,
     errorMessage,
+    ApiError,
     MODELS,
     DEFAULT_MODEL,
     type ModelKey,
-  } from "./lib/api";
+  } from "./lib/spellfix";
   import { currentTheme, setTheme, nextTheme, resolveTheme, type Theme } from "./theme";
 
   /** Client-side total-input cap. Generous (≈ 7 chunked requests) while
-   *  keeping one run well inside the free plan's daily neuron budget. */
+   *  keeping one run well inside a flash-lite free-tier daily budget. */
   const MAX_INPUT = 8000;
-  /** Per-request chunk size — must stay under the server's 4000-char cap. */
+  /** Per-request chunk size — must stay under fixText's 4000-char cap. */
   const CHUNK = 1200;
+
+  /** localStorage key for the user's own Google AI Studio API key. The key
+   *  is stored ONLY in the browser — it never goes anywhere except Google's
+   *  API endpoint. */
+  const KEY_STORAGE = "myan-spell-fix:gemini-key";
 
   /** Demo text with two deliberate, unmistakable typos (မြနာမာ → မြန်မာ,
    *  ဖစ် → ဖြစ်) so first-time visitors see the diff view do its job. */
@@ -26,8 +32,31 @@
   type Phase = "edit" | "fixing" | "review";
   type View = "diff" | "clean";
 
+  function loadKey(): string {
+    try {
+      return localStorage.getItem(KEY_STORAGE) ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  function saveKey(key: string): string {
+    try {
+      if (key) localStorage.setItem(KEY_STORAGE, key);
+      else localStorage.removeItem(KEY_STORAGE);
+    } catch {
+      /* private mode — key lives for this session only */
+    }
+    return key;
+  }
+
   let input = $state("");
   let model = $state<ModelKey>(loadModel());
+  let apiKey = $state<string>(loadKey());
+  /** Key-editing panel state: draft input + whether it's shown. Shown
+   *  automatically when there's no key; reopened via the header button. */
+  let keyDraft = $state("");
+  let editingKey = $state(false);
   let phase = $state<Phase>("edit");
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
@@ -39,9 +68,20 @@
   let ctrl: AbortController | null = null;
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // open the key panel on first visit when no key is stored
+  $effect(() => {
+    if (!apiKey) {
+      keyDraft = "";
+      editingKey = true;
+    }
+  });
+
   const trimmed = $derived(input.trim());
   const canFix = $derived(
-    phase === "edit" && trimmed.length > 0 && input.length <= MAX_INPUT,
+    phase === "edit" &&
+      trimmed.length > 0 &&
+      input.length <= MAX_INPUT &&
+      apiKey.trim().length > 0,
   );
   const overLimit = $derived(input.length > MAX_INPUT);
   const nearLimit = $derived(input.length > MAX_INPUT * 0.9 && !overLimit);
@@ -86,6 +126,17 @@
     themePref = setTheme(nextTheme(themePref));
   }
 
+  function openKeyPanel() {
+    keyDraft = apiKey;
+    editingKey = true;
+  }
+
+  function commitKey() {
+    apiKey = saveKey(keyDraft.trim());
+    editingKey = false;
+    if (apiKey) showToast("API key သိမ်းပြီးပါပြီ — Saved");
+  }
+
   function showToast(msg: string) {
     toast = msg;
     if (toastTimer !== null) clearTimeout(toastTimer);
@@ -107,9 +158,9 @@
 
     try {
       // Sequential on purpose: keeps order trivially correct, reads as
-      // steady progress, and is gentle on the free-tier rate limits.
+      // steady progress, and stays inside Google's free-tier RPM limits.
       for (const part of parts) {
-        const r = await fixText(part, model, ctrl!.signal);
+        const r = await fixText(apiKey.trim(), part, model, ctrl!.signal);
         fixed.push(r.corrected);
         progress = { done: progress.done + 1, total: parts.length };
       }
@@ -119,9 +170,13 @@
       phase = "review";
     } catch (err) {
       // A cancel returns to the editor with whatever text was already
-      // there; a real error keeps the original and explains itself.
+      // there; a real error keeps the original and explains itself. An
+      // invalid key reopens the key panel so it can be fixed in place.
       if (!(err instanceof Error && err.name === "AbortError")) {
         error = errorMessage(err);
+        if (err instanceof ApiError && err.code === "invalid_api_key") {
+          openKeyPanel();
+        }
       }
       phase = "edit";
     } finally {
@@ -190,6 +245,18 @@
           <option value={m.key}>{m.label}</option>
         {/each}
       </select>
+      <button
+        class="btn icon"
+        class:attention={!apiKey}
+        onclick={openKeyPanel}
+        title={apiKey ? "API key settings" : "API key ထည့်ရန် — Add your API key"}
+        aria-label="API key settings"
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="7.5" cy="15.5" r="4.5" />
+          <path d="m10.7 12.3 8.3-8.3m0 0h-4.5m4.5 0v4.5" />
+        </svg>
+      </button>
       <button class="btn icon" onclick={cycleTheme} title={themePref === "light" ? "Light" : themePref === "dark" ? "Dark" : "System"}>
         {#if themePref === "light"}
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -211,6 +278,53 @@
   </header>
 
   <main>
+    {#if editingKey && phase === "edit"}
+      <div class="card keycard">
+        <label class="keylabel" for="api-key-input">
+          Google AI Studio API key
+          {#if apiKey}<span class="keyset">✓ သိမ်းထားပြီး — saved</span>{/if}
+        </label>
+        <div class="keyrow">
+          <input
+            id="api-key-input"
+            type="password"
+            bind:value={keyDraft}
+            placeholder="AIza…"
+            spellcheck="false"
+            autocomplete="off"
+            onkeydown={(e) => e.key === "Enter" && commitKey()}
+          />
+          <button class="btn primary" onclick={commitKey} disabled={keyDraft.trim().length === 0}>
+            <span class="mm">သိမ်းမည်</span>
+          </button>
+          {#if apiKey}
+            <button
+              class="btn"
+              onclick={() => {
+                apiKey = saveKey("");
+                keyDraft = "";
+              }}
+              title="Remove the stored key"
+            >
+              <span class="mm">ဖျက်မည်</span>
+            </button>
+          {/if}
+          {#if apiKey}
+            <button class="btn" onclick={() => (editingKey = false)} title="Close">
+              ✕
+            </button>
+          {/if}
+        </div>
+        <p class="keynote">
+          Key ကို သင့် browser ထဲတွင်သာ သိမ်းဆည်းပါသည် — မည်သည့်ဆာဗာသို့မှ
+          မပို့ပါ။ Gemini သို့သာ တိုက်ရိုက်ချိတ်ဆက်သည်။
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
+            အခမဲ့ key ယူပါ — Get a free key
+          </a>
+        </p>
+      </div>
+    {/if}
+
     {#if error !== null && phase === "edit"}
       <div class="error" role="alert">
         <span>{error}</span>
@@ -326,7 +440,8 @@
 
   <footer>
     Gemini (Google AI Studio) ဖြင့် လည်ပတ်ပြီး Cloudflare တွင် host ပြုထားသည် ·
-    သင့်စာသားကို ပြင်ဆင်ရန်သာ အသုံးပြုပြီး သိမ်းဆည်းခြင်း မပြုပါ။
+    သင့် API key နှင့် စာသားသည် သင့် browser မှ Google သို့သာ သွားပါသည် —
+    မည်သည့်ဆာဗာတွင်မှ သိမ်းဆည်းခြင်း မပြုပါ။
   </footer>
 </div>
 
