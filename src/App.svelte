@@ -20,10 +20,18 @@
   } from "./lib/spellfix";
   import { currentTheme, setTheme, nextTheme, resolveTheme, type Theme } from "./theme";
 
-  /** Per-request chunk size — must stay under fixText's 4000-char cap.
-   *  Total input length is NOT limited: long documents just produce more
-   *  chunks, processed as concurrent batches (ebook-translator style). */
-  const CHUNK = 1200;
+  /** Per-request chunk size (chars) — must stay under fixText's 4000-char
+   *  cap. Total input length is NOT limited: long documents just produce
+   *  more chunks, processed as concurrent batches (ebook-translator style).
+   *  The selector trades requests for focus: နည်း = small requests (more
+   *  of them — the model sees less context each), များ = big requests
+   *  (fewer of them — quota-friendly). */
+  const CHUNK_STEPS = [
+    { size: 600, label: "နည်း" },
+    { size: 1200, label: "ပုံမှန်" },
+    { size: 2400, label: "များ" },
+  ] as const;
+  const CHUNK_DEFAULT = 1200;
   /** Concurrent chunk requests — enough to keep the pipe full at the
    *  free-tier Flash RPM limit, harmless at Flash-Lite's. */
   const POOL = 3;
@@ -98,6 +106,9 @@
   let input = $state("");
   let model = $state<ModelKey>(loadModel());
   let mode = $state<FixMode>(loadMode());
+  /** Selected per-request chunk size (chars) — drives BOTH the request
+   *  estimate and the actual chunking of the next run. */
+  let chunk = $state<number>(loadChunk());
   let apiKey = $state<string>(loadKey());
   /** Key-editing panel state: draft input + whether it's shown. Shown
    *  automatically when there's no key (until dismissed); reopened via the
@@ -112,7 +123,7 @@
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
   /** Auto mode: per-chunk diff segments, merged in document order. Diffing
-   *  each ≤ CHUNK-char part against its own correction keeps every DP
+   *  each ≤ chunk-size part against its own correction keeps every DP
    *  table tiny at any document size — one whole-document diff would
    *  exceed the DP cap (one coarse blob) once the edited middle grows
    *  past ~8k chars. Null in manual mode (applied fixes diff as a whole,
@@ -164,8 +175,9 @@
   let estRequests = $state(0);
   $effect(() => {
     const t = input;
+    const size = chunk;
     const id = setTimeout(() => {
-      estRequests = t.trim() ? chunkText(t, CHUNK).length : 0;
+      estRequests = t.trim() ? chunkText(t, size).length : 0;
     }, 250);
     return () => clearTimeout(id);
   });
@@ -209,6 +221,16 @@
     Math.round((progress.done / Math.max(progress.total, 1)) * 100),
   );
 
+  function loadChunk(): number {
+    try {
+      const v = Number(localStorage.getItem("myan-spell-fix:chunk"));
+      if (CHUNK_STEPS.some((s) => s.size === v)) return v;
+    } catch {
+      /* private mode — default */
+    }
+    return CHUNK_DEFAULT;
+  }
+
   function loadModel(): ModelKey {
     try {
       const v = localStorage.getItem("myan-spell-fix:model");
@@ -223,6 +245,7 @@
     try {
       localStorage.setItem("myan-spell-fix:model", model);
       localStorage.setItem("myan-spell-fix:mode", mode);
+      localStorage.setItem("myan-spell-fix:chunk", String(chunk));
     } catch {
       /* ignore */
     }
@@ -296,7 +319,7 @@
 
   async function runFix() {
     if (!canFix) return;
-    const parts = chunkText(input, CHUNK);
+    const parts = chunkText(input, chunk);
     if (parts.length === 0) return;
 
     phase = "fixing";
@@ -848,6 +871,24 @@
             >
               {input.length.toLocaleString("en-US")} လုံး · ≈{estRequests} request
             </span>
+            <div
+              class="segs"
+              role="group"
+              aria-label="တစ် request စာ အရွယ်အစား — chunk size per request"
+              title="တစ် request လျှောက် ပို့မည့် စာလုံးအရေအတွက် — နည်း = request များသည်၊ များ = request နည်းသည် (chars sent per request)"
+            >
+              {#each CHUNK_STEPS as s (s.size)}
+                <button
+                  class="seg"
+                  class:active={chunk === s.size}
+                  onclick={() => (chunk = s.size)}
+                  aria-pressed={chunk === s.size}
+                  title={`${s.size} လုံး / request`}
+                >
+                  <span class="mm">{s.label}</span>
+                </button>
+              {/each}
+            </div>
             {#if overQuota}
               <span
                 class="badge warn"

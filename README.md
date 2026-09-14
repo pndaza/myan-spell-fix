@@ -38,13 +38,15 @@ inline diff, copy the clean result.
   fix from the editor
 - Handles long documents with **no input cap**: text is split at sentence
   (။) and clause (၊) boundaries into AI-sized chunks, processed as
-  concurrent batches (3 at a time) with live progress. The editor shows
-  the exact request estimate (≈ N requests) and warns when it exceeds the
-  selected model's free daily quota
+  concurrent batches (3 at a time) with live progress. Chunk size is
+  selectable (**နည်း / ပုံမှန် / များ** — 600 / 1200 / 2400 chars per
+  request, persisted); the editor shows the exact request estimate
+  (≈ N requests) and warns when it exceeds the selected model's free
+  daily quota
 - Free-tier friendly by design: rate limits (429) are retried with
   Google's Retry-After hint and backoff — they never kill a run. A chunk
   that still fails keeps its original text; the review header shows how
-  many were skipped ("N အပိုင်း ကျန်"). Cancel (Esc or ရပ်မည်) works
+  many were skipped ("N ပိုင်း ကျန်"). Cancel (Esc or ရပ်မည်) works
   mid-batch
 - Opens plain-text files — **ဖိုင်ဖွင့်မည်** button or drag-and-drop onto
   the editor (.txt/.text/.md; newline-normalized, non-UTF-8 files warned
