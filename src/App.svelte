@@ -121,6 +121,8 @@
   let keyPanelDismissed = $state(false);
   /** About/shortcuts card, opened from the header info icon. */
   let showInfo = $state(false);
+  /** Explanation bubble beside the chunk-size dropdown. */
+  let chunkNote = $state(false);
   let phase = $state<Phase>("edit");
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
@@ -685,9 +687,10 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    // the info card closes first — it overlays whatever phase is active
-    if (e.key === "Escape" && showInfo) {
+    // popovers close first — they overlay whatever phase is active
+    if (e.key === "Escape" && (showInfo || chunkNote)) {
       showInfo = false;
+      chunkNote = false;
       return;
     }
     // Suggest-phase review shortcuts: ↑/↓ move the row cursor (its
@@ -942,23 +945,37 @@
             >
               {input.length.toLocaleString("en-US")} လုံး · ≈{estRequests} request
             </span>
-            <div
-              class="segs"
-              role="group"
-              aria-label="တစ် request စာ အရွယ်အစား — chunk size per request"
-              title="တစ် request လျှောက် ပို့မည့် စာလုံးအရေအတွက် — နည်း = request များသည်၊ များ = request နည်းသည် (chars sent per request)"
-            >
-              {#each CHUNK_STEPS as s (s.size)}
-                <button
-                  class="seg"
-                  class:active={chunk === s.size}
-                  onclick={() => (chunk = s.size)}
-                  aria-pressed={chunk === s.size}
-                  title={`${s.size} လုံး / request`}
-                >
-                  <span class="mm">{s.label}</span>
-                </button>
-              {/each}
+            <div class="chunkpick">
+              <select
+                onchange={(e) => (chunk = Number(e.currentTarget.value))}
+                title="တစ် request လျှောက် ပို့မည့် စာလုံးအရေအတွက် — chunk size per request"
+                aria-label="တစ် request စာ အရွယ်အစား — chunk size per request"
+              >
+                {#each CHUNK_STEPS as s (s.size)}
+                  <option value={s.size} selected={chunk === s.size}>{s.label} — {s.size} လုံး</option>
+                {/each}
+              </select>
+              <button
+                class="chunkinfo"
+                onclick={() => (chunkNote = !chunkNote)}
+                title="ဘာလဲ — what does this mean?"
+                aria-label="chunk အရွယ်အစား ရှင်းလင်းချက် — chunk size explanation"
+                aria-expanded={chunkNote}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M12 16v-4" />
+                  <path d="M12 8h.01" />
+                </svg>
+              </button>
+              {#if chunkNote}
+                <div class="chunk-note" role="note">
+                  တစ် request လျှောက် ပို့မည့် စာလုံးအရေအတွက် —
+                  <b>နည်း</b> = တိုတိုစီပို့၍ request များသည်၊
+                  <b>များ</b> = ရှည်ရှည်စီပို့၍ request နည်းသည် (quota သက်သာ)။
+                  ခန့်မှန်း request အရေအတွက်ကို ဘယ်ဘက်တွင် ပြသည်။
+                </div>
+              {/if}
             </div>
             {#if overQuota}
               <span
