@@ -68,10 +68,10 @@ export function resolveModel(key: unknown): string {
   );
 }
 
-/** Per-request input cap. The client chunks long text into ≤ ~1200-char
- *  requests; this is the last-resort guard against a runaway loop spending
- *  the user's own quota in one call. */
-export const MAX_TEXT_LEN = 4000;
+/** Per-request input cap. The chunk-size selector tops out at 8 pages
+ *  (~16,000 chars); this is the last-resort guard above that, against a
+ *  runaway loop spending the user's own quota in one call. */
+export const MAX_TEXT_LEN = 20_000;
 
 const SYSTEM_PROMPT = `You are a meticulous Burmese (Myanmar language) proofreader.
 
@@ -245,7 +245,7 @@ async function generate(
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: system }] },
           contents: [{ role: "user", parts: [{ text }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 16384 },
+          generationConfig: { temperature: 0.1, maxOutputTokens: 65536 },
         }),
         signal: ac.signal,
       });

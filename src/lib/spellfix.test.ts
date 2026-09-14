@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   DEFAULT_MODEL,
+  MAX_TEXT_LEN,
   MODELS,
   REQUEST_TIMEOUT_MS,
   errorMessage,
@@ -135,7 +136,7 @@ describe("fixText", () => {
       return geminiOk("{}");
     }) as typeof fetch;
     await expect(fixText("k", "  ", DEFAULT_MODEL)).rejects.toMatchObject({ code: "empty" });
-    await expect(fixText("k", "a".repeat(4001), DEFAULT_MODEL)).rejects.toMatchObject({
+    await expect(fixText("k", "a".repeat(MAX_TEXT_LEN + 1), DEFAULT_MODEL)).rejects.toMatchObject({
       code: "too_long",
     });
     expect(called).toBe(0);

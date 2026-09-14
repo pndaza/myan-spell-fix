@@ -20,18 +20,18 @@
   } from "./lib/spellfix";
   import { currentTheme, setTheme, nextTheme, resolveTheme, type Theme } from "./theme";
 
-  /** Per-request chunk size (chars) — must stay under fixText's 4000-char
+  /** Per-request chunk size (chars) — must stay under fixText's 20,000-char
    *  cap. Total input length is NOT limited: long documents just produce
    *  more chunks, processed as concurrent batches (ebook-translator style).
-   *  The selector trades requests for focus: နည်း = small requests (more
-   *  of them — the model sees less context each), များ = big requests
-   *  (fewer of them — quota-friendly). */
+   *  Sized in PAGES (1 မျက်နှာ ≈ 2,000 chars): နည်း = 2 pages, ပုံမှန် =
+   *  5 pages, များ = 8 pages. Bigger chunks mean fewer requests — quota
+   *  friendly — at the cost of the model handling more text per call. */
   const CHUNK_STEPS = [
-    { size: 600, label: "နည်း" },
-    { size: 1200, label: "ပုံမှန်" },
-    { size: 2400, label: "များ" },
+    { size: 4_000, pages: "၂", label: "နည်း" },
+    { size: 10_000, pages: "၅", label: "ပုံမှန်" },
+    { size: 16_000, pages: "၈", label: "များ" },
   ] as const;
-  const CHUNK_DEFAULT = 1200;
+  const CHUNK_DEFAULT = 10_000;
   /** Concurrent chunk requests — enough to keep the pipe full at the
    *  free-tier Flash RPM limit, harmless at Flash-Lite's. */
   const POOL = 3;
@@ -948,11 +948,11 @@
             <div class="chunkpick">
               <select
                 onchange={(e) => (chunk = Number(e.currentTarget.value))}
-                title="တစ် request လျှောက် ပို့မည့် စာလုံးအရေအတွက် — chunk size per request"
+                title="တစ် request လျှောက် ပို့မည့် စာမျက်နှာအရေအတွက် — မျက်နှာတစ်ခု ≈ စာလုံး ၂၀၀၀"
                 aria-label="တစ် request စာ အရွယ်အစား — chunk size per request"
               >
                 {#each CHUNK_STEPS as s (s.size)}
-                  <option value={s.size} selected={chunk === s.size}>{s.label} — {s.size} လုံး</option>
+                  <option value={s.size} selected={chunk === s.size}>{s.label} — မျက်နှာ {s.pages} ခန့်</option>
                 {/each}
               </select>
               <button
@@ -970,10 +970,10 @@
               </button>
               {#if chunkNote}
                 <div class="chunk-note" role="note">
-                  တစ် request လျှောက် ပို့မည့် စာလုံးအရေအတွက် —
-                  <b>နည်း</b> = တိုတိုစီပို့၍ request များသည်၊
-                  <b>များ</b> = ရှည်ရှည်စီပို့၍ request နည်းသည် (quota သက်သာ)။
-                  ခန့်မှန်း request အရေအတွက်ကို ဘယ်ဘက်တွင် ပြသည်။
+                  တစ် request လျှောက် ပို့မည့် စာမျက်နှာအရေအတွက် (မျက်နှာတစ်ခု ≈
+                  စာလုံး ၂၀၀၀) — <b>နည်း</b> = မျက်နှာ ၂ ခန့်စီပို့၍ request
+                  များသည်၊ <b>များ</b> = မျက်နှာ ၈ ခန့်စီပို့၍ request နည်းသည်
+                  (quota သက်သာ)။ ခန့်မှန်း request အရေအတွက်ကို ဘယ်ဘက်တွင် ပြသည်။
                 </div>
               {/if}
             </div>
