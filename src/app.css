@@ -404,10 +404,12 @@ main > .card:has(.editor, .out, .panels) {
 .chunkpick select {
   font-family: var(--my);
   max-width: none;
-  /* asymmetric: Padauk's tall ascent reserves headroom the plain syllables
-     don't use, so a symmetric padding parks the ink low — lift it ~1px */
-  padding: 4px 8px 6px;
+  padding: 3px 8px;
   font-size: 12.5px;
+  /* Myanmar stacks need generous leading (cf. .editor) — also centers the
+     text via half-leading instead of the native baseline placement, which
+     parks Padauk's ascent-heavy line low and can clip below-marks */
+  line-height: 1.9;
 }
 
 .chunkinfo {
