@@ -402,14 +402,19 @@ main > .card:has(.editor, .out, .panels) {
 }
 
 .chunkpick select {
+  /* appearance:none opts out of WebKit's native select text layout, which
+     ignores line-height, seats Padauk's ascent-heavy line at the bottom,
+     and clips the below-marks. Normal CSS layout centers properly. */
+  appearance: none;
+  -webkit-appearance: none;
   font-family: var(--my);
   max-width: none;
-  padding: 3px 8px;
+  padding: 4px 26px 4px 10px;
   font-size: 12.5px;
-  /* Myanmar stacks need generous leading (cf. .editor) — also centers the
-     text via half-leading instead of the native baseline placement, which
-     parks Padauk's ascent-heavy line low and can clip below-marks */
   line-height: 1.9;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%23888a90' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
 }
 
 .chunkinfo {
