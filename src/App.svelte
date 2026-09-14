@@ -182,6 +182,27 @@
     return () => clearTimeout(id);
   });
   const overQuota = $derived(estRequests > modelQuota);
+
+  /** Count chip that pops over the editor when text ARRIVES (first typed
+   *  or pasted character, an opened file) and fades 3 s later — a
+   *  glanceable echo of the counter while the eye is still on the text. */
+  let countPopup = $state(false);
+  let countPopupTimer: ReturnType<typeof setTimeout> | null = null;
+  function showCountPopup() {
+    if (phase !== "edit") return;
+    countPopup = true;
+    if (countPopupTimer !== null) clearTimeout(countPopupTimer);
+    countPopupTimer = setTimeout(() => (countPopup = false), 3000);
+  }
+  {
+    let hadInput = false;
+    $effect(() => {
+      const has = input.trim().length > 0;
+      const arrived = has && !hadInput;
+      hadInput = has;
+      if (arrived) showCountPopup();
+    });
+  }
   const diffSegs = $derived(
     chunkSegs !== null
       ? chunkSegs
@@ -553,6 +574,7 @@
       return;
     }
     input = normalizeText(raw);
+    showCountPopup();
     if (raw.includes("\uFFFD")) {
       showToast("UTF-8 မဟုတ်သော ဖိုင် ဖြစ်နိုင်သည် — စာလုံးပျက်နေနိုင်သည် (File may not be UTF-8)");
     } else {
@@ -860,6 +882,11 @@
           ondragover={onDragOver}
           ondrop={onDrop}
         ></textarea>
+        {#if countPopup && phase === "edit"}
+          <div class="count-pop" role="status">
+            {input.length.toLocaleString("en-US")} လုံး · ≈{estRequests || 1} request
+          </div>
+        {/if}
         {#if phase === "edit"}
           <div class="bar">
             <span

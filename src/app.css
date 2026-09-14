@@ -269,6 +269,7 @@ main {
   border-radius: var(--radius);
   padding: 18px;
   animation: rise 0.18s ease;
+  position: relative; /* anchors the transient count chip */
 }
 
 /* content cards stretch to fill the viewport: the editor, diff, and
@@ -352,6 +353,26 @@ main > .card:has(.editor, .out, .panels) {
 
 .count.warn {
   color: var(--accent-dim);
+}
+
+/* transient echo of the counter, popped over the editor's top-right when
+   text arrives; auto-hides after 3 s. pointer-events: none — it must
+   never block clicks or caret placement underneath. */
+.count-pop {
+  position: absolute;
+  top: 30px;
+  right: 32px;
+  pointer-events: none;
+  z-index: 2;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 4px 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  animation: rise 0.18s ease;
 }
 
 /* chunk-size selector: three joined buttons next to the request estimate.
