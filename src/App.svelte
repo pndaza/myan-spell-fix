@@ -11,14 +11,17 @@
     errorMessage,
     ApiError,
     MODELS,
-    DEFAULT_MODEL,
-    type ModelKey,
+    PROVIDERS,
+    DEFAULT_PROVIDER,
+    resolveProvider,
+    type ProviderId,
     type Suggestion,
     type FixResult,
     type SuggestResult,
     resolveModel,
   } from "./lib/spellfix";
   import { currentTheme, setTheme, nextTheme, resolveTheme, type Theme } from "./theme";
+  import { untrack } from "svelte";
 
   /** Per-request chunk size (chars) — must stay under fixText's 20,000-char
    *  cap. Total input length is NOT limited: long documents just produce
@@ -85,18 +88,25 @@
     return "auto";
   }
 
-  function loadKey(): string {
+  function loadKey(provider: ProviderId): string {
     try {
-      return localStorage.getItem(KEY_STORAGE) ?? "";
+      let v = localStorage.getItem(`myan-spell-fix:key:${provider}`);
+      // one-time migration: the pre-OpenRouter build stored the Google key
+      // under a provider-less name
+      if (provider === "google" && v === null) {
+        v = localStorage.getItem(KEY_STORAGE);
+        if (v !== null) localStorage.setItem("myan-spell-fix:key:google", v);
+      }
+      return v ?? "";
     } catch {
       return "";
     }
   }
 
-  function saveKey(key: string): string {
+  function saveKey(provider: ProviderId, key: string): string {
     try {
-      if (key) localStorage.setItem(KEY_STORAGE, key);
-      else localStorage.removeItem(KEY_STORAGE);
+      if (key) localStorage.setItem(`myan-spell-fix:key:${provider}`, key);
+      else localStorage.removeItem(`myan-spell-fix:key:${provider}`);
     } catch {
       /* private mode — key lives for this session only */
     }
@@ -104,12 +114,15 @@
   }
 
   let input = $state("");
-  let model = $state<ModelKey>(loadModel());
+  let provider = $state<ProviderId>(loadProvider());
+  // initial snapshots: provider changes later go through switchProvider(),
+  // which reloads both — hence the deliberate untrack
+  let model = $state<string>(untrack(() => loadModel(provider)));
   let mode = $state<FixMode>(loadMode());
   /** Selected per-request chunk size (chars) — drives BOTH the request
    *  estimate and the actual chunking of the next run. */
   let chunk = $state<number>(loadChunk());
-  let apiKey = $state<string>(loadKey());
+  let apiKey = $state<string>(untrack(() => loadKey(provider)));
   /** Key-editing panel state: draft input + whether it's shown. Shown
    *  automatically when there's no key (until dismissed); reopened via the
    *  header button. */
@@ -168,10 +181,14 @@
       trimmed.length > 0 &&
       apiKey.trim().length > 0,
   );
+  /** Models of the ACTIVE provider (both providers carry the same Gemini
+   *  family; OpenRouter's are paid per token with no daily free quota). */
+  const providerModels = $derived(PROVIDERS[provider].models);
   /** Free daily requests for the selected model — the estimate below is
-   *  checked against it so users see quota trouble before spending any. */
+   *  checked against it so users see quota trouble before spending any.
+   *  Null on OpenRouter (credit-based): no quota warning there. */
   const modelQuota = $derived(
-    MODELS.find((m) => m.key === model)?.freeRpd ?? 500,
+    providerModels.find((m) => m.key === model)?.freeRpd ?? null,
   );
   /** Exact number of requests the next run will make (same chunker the
    *  run uses). Debounced — chunking a whole book on every keystroke
@@ -185,7 +202,7 @@
     }, 250);
     return () => clearTimeout(id);
   });
-  const overQuota = $derived(estRequests > modelQuota);
+  const overQuota = $derived(modelQuota !== null && estRequests > modelQuota);
 
   /** Count chip that pops over the editor when text ARRIVES (first typed
    *  or pasted character, an opened file) and fades 3 s later — a
@@ -256,19 +273,33 @@
     return CHUNK_DEFAULT;
   }
 
-  function loadModel(): ModelKey {
+  function loadProvider(): ProviderId {
     try {
-      const v = localStorage.getItem("myan-spell-fix:model");
-      if (MODELS.some((m) => m.key === v)) return v as ModelKey;
+      return resolveProvider(localStorage.getItem("myan-spell-fix:provider"));
+    } catch {
+      return DEFAULT_PROVIDER;
+    }
+  }
+
+  function loadModel(prov: ProviderId): string {
+    try {
+      let v = localStorage.getItem(`myan-spell-fix:model:${prov}`);
+      // migration from the provider-less key of single-provider builds
+      if (prov === "google" && v === null) {
+        v = localStorage.getItem("myan-spell-fix:model");
+      }
+      const models = PROVIDERS[prov].models;
+      if (typeof v === "string" && models.some((m) => m.key === v)) return v;
     } catch {
       /* private mode — default */
     }
-    return DEFAULT_MODEL;
+    return PROVIDERS[prov].models[0].key;
   }
 
   $effect(() => {
     try {
-      localStorage.setItem("myan-spell-fix:model", model);
+      localStorage.setItem("myan-spell-fix:provider", provider);
+      localStorage.setItem(`myan-spell-fix:model:${provider}`, model);
       localStorage.setItem("myan-spell-fix:mode", mode);
       localStorage.setItem("myan-spell-fix:chunk", String(chunk));
     } catch {
@@ -319,6 +350,14 @@
     return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
   }
 
+  /** Swap provider: model AND api key are per-provider, so both reload
+   *  (each keeps its own remembered pick). */
+  function switchProvider(next: ProviderId) {
+    provider = next;
+    model = loadModel(next);
+    apiKey = loadKey(next);
+  }
+
   function openKeyPanel() {
     keyDraft = apiKey;
     keyPanelDismissed = false;
@@ -332,7 +371,7 @@
   }
 
   function commitKey() {
-    apiKey = saveKey(keyDraft.trim());
+    apiKey = saveKey(provider, keyDraft.trim());
     editingKey = false;
     if (apiKey) showToast("API key သိမ်းပြီးပါပြီ — Saved");
   }
@@ -371,8 +410,8 @@
     ): Promise<FixResult | SuggestResult> => {
       const call =
         mode === "auto"
-          ? () => fixText(apiKey.trim(), part, model, ac.signal)
-          : () => suggestFixes(apiKey.trim(), part, model, ac.signal);
+          ? () => fixText(apiKey.trim(), part, provider, model, ac.signal)
+          : () => suggestFixes(apiKey.trim(), part, provider, model, ac.signal);
       return withRetries<FixResult | SuggestResult>(call, {
         attempts: CHUNK_ATTEMPTS,
         retryIf: (err) => err instanceof ApiError && RETRYABLE.has(err.code),
@@ -405,18 +444,20 @@
           if (part.trim().length === 0) {
             progress = { done: progress.done + 1, total: parts.length };
             return mode === "auto"
-              ? ({ corrected: part, model: resolveModel(model), parseMode: "json", ms: 0 } as FixResult)
+              ? ({ corrected: part, model: resolveModel(provider, model), parseMode: "json", ms: 0 } as FixResult)
               : ({ fixes: [], ms: 0 } as SuggestResult);
           }
           const r = await runChunk(part);
           progress = { done: progress.done + 1, total: parts.length };
           return r;
         },
-        // key/access errors are futile to retry on the next chunk — stop
-        // the whole run so the user can fix the cause first
+        // key/access/credit errors are futile to retry on the next chunk —
+        // stop the whole run so the user can fix the cause first
         (err) =>
           err instanceof ApiError &&
-          (err.code === "invalid_api_key" || err.code === "forbidden"),
+          (err.code === "invalid_api_key" ||
+            err.code === "forbidden" ||
+            err.code === "insufficient_credits"),
       );
       pauseNote = null;
 
@@ -753,12 +794,24 @@
         <option value="manual">တစ်ခုချင်း (Manual)</option>
       </select>
       <select
+        value={provider}
+        onchange={(e) => switchProvider(e.currentTarget.value as ProviderId)}
+        title="AI provider — Google AI Studio (အခမဲ့ quota) သို့မဟုတ် OpenRouter (credit ဖြင့် အသုံးပြု)"
+        aria-label="AI provider"
+      >
+        {#each Object.values(PROVIDERS) as p (p.id)}
+          <option value={p.id}>{p.label}</option>
+        {/each}
+      </select>
+      <select
         bind:value={model}
-        title="AI model — Gemini (Google AI Studio). Flash Lite အမြန်ဆုံး၊ Flash ပိုမှန်ကန်သည်"
+        title="AI model — Gemini. Flash Lite အမြန်ဆုံး၊ Flash ပိုမှန်ကန်သည်"
         aria-label="AI model"
       >
-        {#each MODELS as m (m.key)}
-          <option value={m.key}>{m.label} ({m.freeRpd}/day)</option>
+        {#each providerModels as m (m.key)}
+          <option value={m.key}>
+            {m.label}{m.freeRpd !== undefined ? ` (${m.freeRpd}/day)` : ""}
+          </option>
         {/each}
       </select>
       <button
@@ -819,15 +872,18 @@
         <ul class="infolist">
           <li>
             Google Gemini ဖြင့် မြန်မာ စာလုံးပြင်ပေးသည့် ကိရိယာ — စာသားသည်
-            သင့် browser မှ Google သို့သာ တိုက်ရိုက်သွားပါသည်။
+            သင့် browser မှ ရွေးထားသော provider သို့သာ တိုက်ရိုက်သွားပါသည်။
           </li>
           <li>
-            ကိုယ်ပိုင် API key လိုအပ်သည် — browser ထဲတွင်သာ သိမ်းဆည်းပါသည်။
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">အခမဲ့ key ယူပါ</a>
+            provider နှစ်ခု — Google AI Studio (အခမဲ့ quota:
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">အခမဲ့ key</a>)
+            သို့မဟုတ် OpenRouter (credit ဖြင့် အသုံးပြု:
+            <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">key ယူပါ</a>)။
+            key ကို browser ထဲတွင်သာ သိမ်းဆည်းပါသည်။
           </li>
           <li>
-            အခမဲ့ quota — Flash-Lite ~500 request/နေ့၊ Flash ~20 request/နေ့။
-            ခန့်မှန်း request အရေအတွက်ကို အောက်တွင် ပြသည်။
+            Google AI Studio အခမဲ့ quota — Flash-Lite ~500 request/နေ့၊ Flash
+            ~20 request/နေ့။ ခန့်မှန်း request အရေအတွက်ကို အောက်တွင် ပြသည်။
           </li>
           <li>
             chunk အရွယ်အစား — နည်း = request များသည်၊ များ = request နည်းသည်။
@@ -843,7 +899,7 @@
     {#if editingKey && phase === "edit"}
       <div class="card keycard">
         <label class="keylabel" for="api-key-input">
-          Google AI Studio API key
+          {PROVIDERS[provider].keyLabel}
           {#if apiKey}<span class="keyset">✓ သိမ်းထားပြီး — saved</span>{/if}
         </label>
         <div class="keyrow">
@@ -851,7 +907,7 @@
             id="api-key-input"
             type="password"
             bind:value={keyDraft}
-            placeholder="AIza…"
+            placeholder={PROVIDERS[provider].keyPlaceholder}
             spellcheck="false"
             autocomplete="off"
             onkeydown={(e) => e.key === "Enter" && commitKey()}
@@ -863,7 +919,7 @@
             <button
               class="btn"
               onclick={() => {
-                apiKey = saveKey("");
+                apiKey = saveKey(provider, "");
                 keyDraft = "";
               }}
               title="Remove the stored key"
@@ -877,10 +933,16 @@
         </div>
         <p class="keynote">
           Key ကို သင့် browser ထဲတွင်သာ သိမ်းဆည်းပါသည် — မည်သည့်ဆာဗာသို့မှ
-          မပို့ပါ။ Gemini သို့သာ တိုက်ရိုက်ချိတ်ဆက်သည်။
-          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
-            အခမဲ့ key ယူပါ — Get a free key
-          </a>
+          မပို့ပါ။ {PROVIDERS[provider].label} သို့သာ တိုက်ရိုက်ချိတ်ဆက်သည်။
+          {#if provider === "google"}
+            <a href={PROVIDERS[provider].keyUrl} target="_blank" rel="noreferrer">
+              အခမဲ့ key ယူပါ — Get a free key
+            </a>
+          {:else}
+            <a href={PROVIDERS[provider].keyUrl} target="_blank" rel="noreferrer">
+              OpenRouter key ယူပါ — Get a key
+            </a>
+          {/if}
         </p>
       </div>
     {/if}
@@ -941,7 +1003,9 @@
               class:warn={overQuota}
               title={overQuota
                 ? `ရွေးထားသော model ၏ နေ့စဉ်အခမဲ့ quota (${modelQuota}) ထက် ပိုနိုင်သည် — အခြား model သို့ ပြောင်းကြည့်ပါ`
-                : `≈ ${estRequests} request — ${modelQuota}/day free on this model`}
+                : modelQuota !== null
+                  ? `≈ ${estRequests} request — ${modelQuota}/day free on this model`
+                  : `≈ ${estRequests} request — paid per token on OpenRouter`}
             >
               {input.length.toLocaleString("en-US")} လုံး · ≈{estRequests} request
             </span>
@@ -1189,8 +1253,9 @@
   </main>
 
   <footer>
-    Gemini (Google AI Studio) ဖြင့် လည်ပတ်ပြီး Cloudflare တွင် host ပြုထားသည် ·
-    သင့် API key နှင့် စာသားသည် သင့် browser မှ Google သို့သာ သွားပါသည် —
+    Gemini ဖြင့် လည်ပတ်ပြီး Cloudflare တွင် host ပြုထားသည် ·
+    သင့် API key နှင့် စာသားသည် သင့် browser မှ ရွေးထားသော provider
+    (Google AI Studio / OpenRouter) သို့သာ သွားပါသည် —
     မည်သည့်ဆာဗာတွင်မှ သိမ်းဆည်းခြင်း မပြုပါ။
     <a
       class="gh"

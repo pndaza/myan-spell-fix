@@ -44,10 +44,16 @@ inline diff, copy the clean result.
   estimate (≈ N requests) and warns when it exceeds the selected model's
   free daily quota
 - Free-tier friendly by design: rate limits (429) are retried with
-  Google's Retry-After hint and backoff — they never kill a run. A chunk
+  Retry-After hints and backoff — they never kill a run. A chunk
   that still fails keeps its original text; the review header shows how
   many were skipped ("N ပိုင်း ကျန်"). Cancel (Esc or ရပ်မည်) works
   mid-batch
+- **Two providers, same Gemini models** (header dropdown): **Google AI
+  Studio** (free daily quota per key) or **OpenRouter** (the same six
+  Gemini models, paid per token via account credits — no daily quota
+  warning). Each provider remembers its own API key and model pick;
+  OpenRouter sends requests browser → openrouter.ai directly with a
+  `Bearer` key, the same browser-only storage rule
 - Opens plain-text files — **ဖိုင်ဖွင့်မည်** button or drag-and-drop onto
   the editor (.txt/.text/.md; newline-normalized, non-UTF-8 files warned
   about)

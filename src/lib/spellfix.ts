@@ -60,11 +60,62 @@ export type ModelKey = (typeof MODELS)[number]["key"];
 
 export const DEFAULT_MODEL: ModelKey = "gemini-3.5-flash-lite";
 
-export function resolveModel(key: unknown): string {
+/** OpenRouter carries the same Gemini lineup under vendor-prefixed ids —
+ *  the model family that actually handles Burmese proofreading well, so
+ *  we deliberately offer nothing else there. Paid per token via account
+ *  credits: no daily free-request quota, hence no `freeRpd`. */
+const OPENROUTER_MODELS = [
+  { key: "google/gemini-3.5-flash-lite", label: "3.5 Flash-Lite" },
+  { key: "google/gemini-3.1-flash-lite", label: "3.1 Flash-Lite" },
+  { key: "google/gemini-3.8-flash", label: "3.8 Flash" },
+  { key: "google/gemini-3.7-flash", label: "3.7 Flash" },
+  { key: "google/gemini-3.6-flash", label: "3.6 Flash" },
+  { key: "google/gemini-3.5-flash", label: "3.5 Flash" },
+] as const;
+
+export type ProviderId = "google" | "openrouter";
+
+export interface ProviderDef {
+  id: ProviderId;
+  label: string;
+  /** Key panel heading. */
+  keyLabel: string;
+  /** Where the user creates a key. */
+  keyUrl: string;
+  keyPlaceholder: string;
+  models: ReadonlyArray<{ key: string; label: string; freeRpd?: number }>;
+}
+
+export const PROVIDERS: Record<ProviderId, ProviderDef> = {
+  google: {
+    id: "google",
+    label: "Google AI Studio",
+    keyLabel: "Google AI Studio API key",
+    keyUrl: "https://aistudio.google.com/apikey",
+    keyPlaceholder: "AIza…",
+    models: MODELS,
+  },
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    keyLabel: "OpenRouter API key",
+    keyUrl: "https://openrouter.ai/keys",
+    keyPlaceholder: "sk-or-…",
+    models: OPENROUTER_MODELS,
+  },
+};
+
+export const DEFAULT_PROVIDER: ProviderId = "google";
+
+export function resolveProvider(v: unknown): ProviderId {
+  return v === "openrouter" ? "openrouter" : "google";
+}
+
+export function resolveModel(provider: ProviderId, key: unknown): string {
+  const models = PROVIDERS[provider].models;
   return (
-    (typeof key === "string" && MODELS.some((m) => m.key === key)
-      ? key
-      : undefined) ?? DEFAULT_MODEL
+    (typeof key === "string" && models.some((m) => m.key === key) ? key : undefined) ??
+    models[0].key
   );
 }
 
@@ -161,12 +212,13 @@ export class ApiError extends Error {
 export async function fixText(
   apiKey: string,
   text: string,
+  provider: ProviderId,
   modelKey: string,
   signal?: AbortSignal,
 ): Promise<FixResult> {
-  const { raw, ms } = await generate(apiKey, text, modelKey, SYSTEM_PROMPT, signal);
+  const { raw, ms } = await generate(apiKey, text, provider, modelKey, SYSTEM_PROMPT, signal);
   const { corrected, parseMode } = parseCorrected(raw);
-  return { corrected, model: resolveModel(modelKey), parseMode, ms };
+  return { corrected, model: resolveModel(provider, modelKey), parseMode, ms };
 }
 
 /** One wrong→correct suggestion from MANUAL mode. */
@@ -192,10 +244,11 @@ export interface SuggestResult {
 export async function suggestFixes(
   apiKey: string,
   text: string,
+  provider: ProviderId,
   modelKey: string,
   signal?: AbortSignal,
 ): Promise<SuggestResult> {
-  const { raw, ms } = await generate(apiKey, text, modelKey, SUGGEST_SYSTEM_PROMPT, signal);
+  const { raw, ms } = await generate(apiKey, text, provider, modelKey, SUGGEST_SYSTEM_PROMPT, signal);
   return { fixes: parseFixes(raw), ms };
 }
 
@@ -203,11 +256,13 @@ export async function suggestFixes(
  *  chunk loop — a run ends on its own even if the user never cancels. */
 export const REQUEST_TIMEOUT_MS = 60_000;
 
-/** Shared Gemini generateContent round-trip: validates input size, then
- *  returns the raw reply text. */
+/** Shared round-trip: validates input size, then returns the raw reply
+ *  text. Same prompts on both providers — only the HTTP shape differs
+ *  (Gemini generateContent vs OpenAI-compatible chat/completions). */
 async function generate(
   apiKey: string,
   text: string,
+  provider: ProviderId,
   modelKey: string,
   system: string,
   signal?: AbortSignal,
@@ -218,8 +273,9 @@ async function generate(
   if (text.length > MAX_TEXT_LEN) {
     throw new ApiError(`Text too long (max ${MAX_TEXT_LEN} characters per request).`, "too_long");
   }
-  const model = resolveModel(modelKey);
+  const model = resolveModel(provider, modelKey);
   const t0 = performance.now();
+  const svc = PROVIDERS[provider].label;
 
   // Compose the caller's cancel signal with a timeout. A manual controller
   // (rather than AbortSignal.any) keeps older browsers working; `timedOut`
@@ -236,76 +292,146 @@ async function generate(
   try {
     let res: Response;
     try {
-      res = await fetch(`${API_BASE}/${model}:generateContent`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-goog-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents: [{ role: "user", parts: [{ text }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 65536 },
-        }),
-        signal: ac.signal,
-      });
+      if (provider === "openrouter") {
+        res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${apiKey}`,
+            // optional app attribution for OpenRouter's rankings page
+            "x-title": "Myan Spell Fix",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "system", content: system },
+              { role: "user", content: text },
+            ],
+            temperature: 0.1,
+            max_tokens: 65536,
+          }),
+          signal: ac.signal,
+        });
+      } else {
+        res = await fetch(`${API_BASE}/${model}:generateContent`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents: [{ role: "user", parts: [{ text }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 65536 },
+          }),
+          signal: ac.signal,
+        });
+      }
     } catch (err) {
       if (signal?.aborted) throw err; // user cancel — keep the raw AbortError
       if (timedOut) {
-        throw new ApiError("Google AI Studio did not answer in time.", "timeout");
+        throw new ApiError(`${svc} did not answer in time.`, "timeout");
       }
       // fetch itself failed — network or CORS territory
-      throw new ApiError("Could not reach Google AI Studio.", "network");
+      throw new ApiError(`Could not reach ${svc}.`, "network");
     }
 
-    let body: GeminiResponse;
+    let body: unknown;
     try {
-      body = (await res.json()) as GeminiResponse;
+      body = await res.json();
     } catch (err) {
       // the body stream can also abort mid-download (cancel or timeout)
       if (signal?.aborted && err instanceof Error && err.name === "AbortError") {
         throw err;
       }
       if (timedOut) {
-        throw new ApiError("Google AI Studio did not answer in time.", "timeout");
+        throw new ApiError(`${svc} did not answer in time.`, "timeout");
       }
-      throw new ApiError("Unreadable response from Google AI Studio.", "ai_error", res.status);
+      throw new ApiError(`Unreadable response from ${svc}.`, "ai_error", res.status);
     }
 
     if (!res.ok) {
-      throw mapGoogleError(res.status, body);
+      throw provider === "openrouter"
+        ? mapOpenRouterError(res.status, body)
+        : mapGoogleError(res.status, body as GeminiResponse);
     }
 
-    const cand = body.candidates?.[0];
-    const raw = cand?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
-    if (raw === "") {
-      // Empty candidate: safety block, or a finishReason that produced nothing
-      const why =
-        body.promptFeedback?.blockReason ??
-        cand?.finishReason ??
-        "no content returned";
+    const raw = provider === "openrouter" ? orContent(body) : geminiContent(body as GeminiResponse);
+    if (raw.text === "") {
+      const why = raw.why ?? "no content returned";
       throw new ApiError(
         `The model returned no text (${why}). Try rephrasing the input.`,
         "ai_error",
       );
     }
-    // A non-STOP finish means the reply was cut short (MAX_TOKENS, SAFETY…).
-    // Half a correction is worse than a clear error: in AUTO mode a truncated
-    // `{"corrected": "…` would fall through to raw-text parsing and the
-    // chunk's tail would silently vanish; in MANUAL mode it would read as
-    // "no errors found".
-    const finish = cand?.finishReason;
-    if (finish !== undefined && finish !== "STOP") {
+    // A non-clean finish means the reply was cut short (length/MAX_TOKENS,
+    // content filter…). Half a correction is worse than a clear error: in
+    // AUTO mode a truncated `{"corrected": "…` would fall through to
+    // raw-text parsing and the chunk's tail would silently vanish; in
+    // MANUAL mode it would read as "no errors found".
+    if (raw.finish !== undefined && raw.finish !== true) {
       throw new ApiError(
-        `The model's reply was cut off (${finish}). Try a shorter text or another model.`,
+        `The model's reply was cut off (${raw.finish}). Try a shorter text or another model.`,
         "ai_error",
       );
     }
-    return { raw, ms: Math.round(performance.now() - t0) };
+    return { raw: raw.text, ms: Math.round(performance.now() - t0) };
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", forward);
   }
+}
+
+/** Extract the reply text (and why it might be empty) from a Gemini
+ *  generateContent body. `finish` is true for a clean STOP, false never,
+ *  or the raw finishReason string when the reply ended abnormally. */
+function geminiContent(body: GeminiResponse): { text: string; why?: string; finish?: string | boolean } {
+  const cand = body.candidates?.[0];
+  const text = cand?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  if (text === "") {
+    return { text, why: body.promptFeedback?.blockReason ?? cand?.finishReason };
+  }
+  const finish = cand?.finishReason;
+  return { text, finish: finish === undefined ? true : finish === "STOP" ? true : finish };
+}
+
+/** Same for an OpenAI-compatible chat/completions body (OpenRouter). */
+function orContent(body: unknown): { text: string; why?: string; finish?: string | boolean } {
+  const b = body as {
+    choices?: Array<{ message?: { content?: string | null }; finish_reason?: string }>;
+  };
+  const choice = b.choices?.[0];
+  const text = typeof choice?.message?.content === "string" ? choice.message.content : "";
+  if (text === "") return { text, why: choice?.finish_reason };
+  const finish = choice?.finish_reason;
+  return { text, finish: finish === undefined ? true : finish === "stop" ? true : finish };
+}
+
+/** Map a non-2xx OpenRouter reply onto our error codes. */
+function mapOpenRouterError(status: number, body: unknown): ApiError {
+  const msg =
+    (body as { error?: { message?: string } })?.error?.message ?? `HTTP ${status}`;
+  if (status === 401) {
+    return new ApiError("The API key is invalid.", "invalid_api_key", status);
+  }
+  if (status === 402) {
+    // account-level problem — retrying other chunks cannot help
+    return new ApiError(
+      "OpenRouter credits are insufficient for this request.",
+      "insufficient_credits",
+      status,
+    );
+  }
+  if (status === 429) {
+    return new ApiError("OpenRouter rate limit reached.", "rate_limited", status);
+  }
+  if (status >= 500 || status === 408) {
+    return new ApiError("OpenRouter is busy — retry shortly.", "capacity", status);
+  }
+  if (/api key/i.test(msg)) {
+    return new ApiError("The API key is invalid.", "invalid_api_key", status);
+  }
+  return new ApiError(`OpenRouter rejected the request: ${msg}`, "bad_request", status);
 }
 
 /** Interpret a parsed reply as a fixes list: a bare array, a {"fixes": […]}
@@ -539,18 +665,20 @@ export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     switch (err.code) {
       case "rate_limited":
-        return "Google ၏ quota သို့မဟုတ် တစ်မိနစ်အတွင်း ကန့်သတ်ချက် ပြည့်သွားပါပြီ — ခဏစောင့်ပြီး ပြန်စမ်းပါ သို့မဟုတ် အခြား model ရွေးပါ။ (Quota or per-minute rate limit reached — wait a minute and retry, or try another model.)";
+        return "Provider ၏ quota သို့မဟုတ် တစ်မိနစ်အတွင်း ကန့်သတ်ချက် ပြည့်သွားပါပြီ — ခဏစောင့်ပြီး ပြန်စမ်းပါ သို့မဟုတ် အခြား model ရွေးပါ။ (Quota or per-minute rate limit reached — wait a minute and retry, or try another model.)";
       case "capacity":
       case "network":
-        return "Google AI Studio သို့ မချိတ်ဆက်နိုင်ပါ — ခဏနေပြီး ထပ်စမ်းပါ။ (Could not reach Google AI Studio — retry shortly.)";
+        return "AI provider သို့ မချိတ်ဆက်နိုင်ပါ — ခဏနေပြီး ထပ်စမ်းပါ။ (Could not reach the AI provider — retry shortly.)";
       case "timeout":
-        return "Google AI Studio မှ အချိန်အတွင်း အဖြေ မရရှိပါ — ထပ်စမ်းပါ။ (No reply in time — try again.)";
+        return "AI provider မှ အချိန်အတွင်း အဖြေ မရရှိပါ — ထပ်စမ်းပါ။ (No reply in time — try again.)";
       case "too_long":
         return "စာသား ရှည်လွန်းပါသည်။ (Text too long.)";
       case "empty":
         return "စာသား မရှိပါ။ (No text.)";
       case "invalid_api_key":
         return "API key မှားယွင်းနေပါသည် — Settings တွင် ပြင်ပါ။ (Invalid API key — fix it in Settings.)";
+      case "insufficient_credits":
+        return "OpenRouter credit မလုံလောက်ပါ — OpenRouter တွင် credit ထပ်ထည့်ပါ သို့မဟုတ် Google AI Studio သို့ ပြောင်းပါ။ (Insufficient OpenRouter credits — top up or switch to Google AI Studio.)";
       case "forbidden":
         return "Google မှ ခွင့်ပြုချက် ငြင်းပါသည် (ဒေသ ကန့်သတ်ချက် ဖြစ်နိုင်သည်) — အခြားကွန်ရက် သို့မဟုတ် key ဖြင့် စမ်းပါ။ (Google denied the request — possibly a region restriction; try another network or key.)";
       default:
