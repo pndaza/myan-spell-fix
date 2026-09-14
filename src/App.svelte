@@ -952,7 +952,7 @@
                 aria-label="တစ် request စာ အရွယ်အစား — chunk size per request"
               >
                 {#each CHUNK_STEPS as s (s.size)}
-                  <option value={s.size} selected={chunk === s.size}>{s.label} — မျက်နှာ {s.pages} ခန့်</option>
+                  <option value={s.size} selected={chunk === s.size}>{s.label} — {s.pages} မျက်နှာခန့်</option>
                 {/each}
               </select>
               <button
@@ -971,8 +971,8 @@
               {#if chunkNote}
                 <div class="chunk-note" role="note">
                   တစ် request လျှောက် ပို့မည့် စာမျက်နှာအရေအတွက် (မျက်နှာတစ်ခု ≈
-                  စာလုံး ၂၀၀၀) — <b>နည်း</b> = မျက်နှာ ၂ ခန့်စီပို့၍ request
-                  များသည်၊ <b>များ</b> = မျက်နှာ ၈ ခန့်စီပို့၍ request နည်းသည်
+                  စာလုံး ၂၀၀၀) — <b>နည်း</b> = ၂ မျက်နှာခန့်စီပို့၍ request
+                  များသည်၊ <b>များ</b> = ၈ မျက်နှာခန့်စီပို့၍ request နည်းသည်
                   (quota သက်သာ)။ ခန့်မှန်း request အရေအတွက်ကို ဘယ်ဘက်တွင် ပြသည်။
                 </div>
               {/if}

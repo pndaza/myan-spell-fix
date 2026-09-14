@@ -39,7 +39,7 @@ inline diff, copy the clean result.
 - Handles long documents with **no input cap**: text is split at sentence
   (။) and clause (၊) boundaries into AI-sized chunks, processed as
   concurrent batches (3 at a time) with live progress. Chunk size is
-  selectable in pages (**နည်း / ပုံမှန် / များ** — 2 / 5 / 8 မျက်နှာ,
+  selectable in pages (**နည်း / ပုံမှန် / များ** — ၂ / ၅ / ၈ မျက်နှာခန့်,
   ≈2,000 chars per page, persisted); the editor shows the exact request
   estimate (≈ N requests) and warns when it exceeds the selected model's
   free daily quota
