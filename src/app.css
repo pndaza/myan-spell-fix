@@ -355,13 +355,24 @@ main > .card:has(.editor, .out, .panels) {
   color: var(--accent-dim);
 }
 
-/* transient echo of the counter, popped over the editor's top-right when
-   text arrives; auto-hides after 3 s. pointer-events: none — it must
-   never block clicks or caret placement underneath. */
+/* wraps the editor so the transient count chip can center on the EDITOR
+   (not the whole card, which includes the bottom action bar) */
+.editorwrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* transient echo of the counter, popped at the editor's center when text
+   arrives; auto-hides after 3 s. pointer-events: none — it must never
+   block clicks or caret placement underneath. Fade-only animation: a
+   transform keyframe would fight the centering translate. */
 .count-pop {
   position: absolute;
-  top: 30px;
-  right: 32px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 2;
   font-family: var(--mono);
@@ -372,7 +383,13 @@ main > .card:has(.editor, .out, .panels) {
   border-radius: 999px;
   padding: 4px 12px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
-  animation: rise 0.18s ease;
+  animation: count-pop-in 0.18s ease;
+}
+
+@keyframes count-pop-in {
+  from {
+    opacity: 0;
+  }
 }
 
 /* chunk-size selector: three joined buttons next to the request estimate.

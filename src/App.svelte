@@ -869,24 +869,26 @@
             </div>
           </div>
         {/if}
-        <textarea
-          class="editor"
-          class:dragover={dragging}
-          bind:value={input}
-          disabled={phase === "fixing"}
-          placeholder="မြန်မာစာ ရိုက်ထည့်ပါ၊ ကူးထည့်ပါ သို့မဟုတ် .txt ဖိုင်ကို ဤနေရာတွင် ချထားပါ…"
-          spellcheck="false"
-          aria-label="မြန်မာစာသား ထည့်ရန်"
-          ondragenter={onDragEnter}
-          ondragleave={onDragLeave}
-          ondragover={onDragOver}
-          ondrop={onDrop}
-        ></textarea>
-        {#if countPopup && phase === "edit"}
-          <div class="count-pop" role="status">
-            {input.length.toLocaleString("en-US")} လုံး · ≈{estRequests || 1} request
-          </div>
-        {/if}
+        <div class="editorwrap">
+          <textarea
+            class="editor"
+            class:dragover={dragging}
+            bind:value={input}
+            disabled={phase === "fixing"}
+            placeholder="မြန်မာစာ ရိုက်ထည့်ပါ၊ ကူးထည့်ပါ သို့မဟုတ် .txt ဖိုင်ကို ဤနေရာတွင် ချထားပါ…"
+            spellcheck="false"
+            aria-label="မြန်မာစာသား ထည့်ရန်"
+            ondragenter={onDragEnter}
+            ondragleave={onDragLeave}
+            ondragover={onDragOver}
+            ondrop={onDrop}
+          ></textarea>
+          {#if countPopup && phase === "edit"}
+            <div class="count-pop" role="status">
+              {input.length.toLocaleString("en-US")} လုံး · ≈{estRequests || 1} request
+            </div>
+          {/if}
+        </div>
         {#if phase === "edit"}
           <div class="bar">
             <span
