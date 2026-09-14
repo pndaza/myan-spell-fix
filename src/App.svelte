@@ -119,6 +119,8 @@
    *  first-time visitors can decline to enter a key and still use the
    *  editor; the panel stops reopening until they ask for it. */
   let keyPanelDismissed = $state(false);
+  /** About/shortcuts card, opened from the header info icon. */
+  let showInfo = $state(false);
   let phase = $state<Phase>("edit");
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
@@ -319,6 +321,7 @@
     keyDraft = apiKey;
     keyPanelDismissed = false;
     editingKey = true;
+    showInfo = false;
   }
 
   function closeKeyPanel() {
@@ -682,6 +685,11 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // the info card closes first — it overlays whatever phase is active
+    if (e.key === "Escape" && showInfo) {
+      showInfo = false;
+      return;
+    }
     // Suggest-phase review shortcuts: ↑/↓ move the row cursor (its
     // fragments light up in the text panel), Space toggles, Enter applies.
     if (phase === "suggest") {
@@ -779,22 +787,56 @@
           </svg>
         {/if}
       </button>
-      <a
+      <button
         class="btn icon"
-        href="https://github.com/pndaza/myan-spell-fix"
-        target="_blank"
-        rel="noreferrer"
-        title="GitHub repository"
-        aria-label="GitHub repository"
+        onclick={() => {
+          showInfo = !showInfo;
+          if (showInfo) editingKey = false;
+        }}
+        title="အချက်အလက် — About, quota & shortcuts"
+        aria-label="အချက်အလက် — About, quota and shortcuts"
+        aria-expanded={showInfo}
       >
-        <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 16v-4" />
+          <path d="M12 8h.01" />
         </svg>
-      </a>
+      </button>
     </div>
   </header>
 
   <main>
+    {#if showInfo}
+      <div class="card infocard">
+        <div class="infohead">
+          <span class="infotitle">မြန်မာစာလုံးပြင် — Myan Spell Fix</span>
+          <button class="btn" onclick={() => (showInfo = false)} title="ပိတ်မည် — Close">✕</button>
+        </div>
+        <ul class="infolist">
+          <li>
+            Google Gemini ဖြင့် မြန်မာ စာလုံးပြင်ပေးသည့် ကိရိယာ — စာသားသည်
+            သင့် browser မှ Google သို့သာ တိုက်ရိုက်သွားပါသည်။
+          </li>
+          <li>
+            ကိုယ်ပိုင် API key လိုအပ်သည် — browser ထဲတွင်သာ သိမ်းဆည်းပါသည်။
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">အခမဲ့ key ယူပါ</a>
+          </li>
+          <li>
+            အခမဲ့ quota — Flash-Lite ~500 request/နေ့၊ Flash ~20 request/နေ့။
+            ခန့်မှန်း request အရေအတွက်ကို အောက်တွင် ပြသည်။
+          </li>
+          <li>
+            chunk အရွယ်အစား — နည်း = request များသည်၊ များ = request နည်းသည်။
+          </li>
+          <li>
+            shortcut — Ctrl/⌘ + Enter = စတင်၊ Esc = ပိတ်/နောက်သို့၊ manual mode
+            တွင် ↑↓ · Space · Enter
+          </li>
+        </ul>
+      </div>
+    {/if}
+
     {#if editingKey && phase === "edit"}
       <div class="card keycard">
         <label class="keylabel" for="api-key-input">
@@ -1131,6 +1173,19 @@
     Gemini (Google AI Studio) ဖြင့် လည်ပတ်ပြီး Cloudflare တွင် host ပြုထားသည် ·
     သင့် API key နှင့် စာသားသည် သင့် browser မှ Google သို့သာ သွားပါသည် —
     မည်သည့်ဆာဗာတွင်မှ သိမ်းဆည်းခြင်း မပြုပါ။
+    <a
+      class="gh"
+      href="https://github.com/pndaza/myan-spell-fix"
+      target="_blank"
+      rel="noreferrer"
+      title="GitHub repository"
+      aria-label="GitHub repository"
+    >
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+      </svg>
+      <span>GitHub</span>
+    </a>
   </footer>
 </div>
 

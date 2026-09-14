@@ -569,6 +569,41 @@ main > .card:has(.editor, .out, .panels) {
   color: var(--accent-dim);
 }
 
+/* about/shortcuts card opened from the header info icon */
+.infocard {
+  padding: 14px 18px;
+  margin-bottom: 14px;
+}
+
+.infohead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.infotitle {
+  font-family: var(--my);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.infolist {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-family: var(--my);
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.infolist a {
+  color: var(--accent-dim);
+}
+
 /* result */
 
 .result-head {
@@ -867,6 +902,23 @@ footer {
   font-family: var(--my);
   line-height: 1.7;
   text-align: center;
+}
+
+/* repo link — the GitHub icon moved here from the header (most users
+   don't need it; the info icon took its place) */
+footer .gh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 10px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+  vertical-align: middle;
+}
+
+footer .gh:hover {
+  color: var(--text-dim);
 }
 
 /* toast */
