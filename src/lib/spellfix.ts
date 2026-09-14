@@ -27,37 +27,31 @@ export const MODELS = [
   {
     key: "gemini-3.5-flash-lite",
     label: "3.5 Flash-Lite",
-    hint: "Default · ~500/day free",
     freeRpd: 500,
   },
   {
     key: "gemini-3.1-flash-lite",
     label: "3.1 Flash-Lite",
-    hint: "~500/day free",
     freeRpd: 500,
   },
   {
     key: "gemini-3.8-flash",
     label: "3.8 Flash",
-    hint: "Best · ~20/day free",
     freeRpd: 20,
   },
   {
     key: "gemini-3.7-flash",
     label: "3.7 Flash",
-    hint: "~20/day free",
     freeRpd: 20,
   },
   {
     key: "gemini-3.6-flash",
     label: "3.6 Flash",
-    hint: "~20/day free",
     freeRpd: 20,
   },
   {
     key: "gemini-3.5-flash",
     label: "3.5 Flash",
-    hint: "~20/day free",
     freeRpd: 20,
   },
 ] as const;

@@ -16,6 +16,19 @@ describe("chunkText", () => {
     expect(chunks.join("")).toBe(text);
   });
 
+  it("keeps a trailing space as its own whitespace-only chunk when the last chunk is full", () => {
+    // The ။-sentence fills the chunk exactly (1200 chars), so the trailing
+    // space cannot merge and becomes a whitespace-only chunk. The run
+    // pipeline must pass such chunks through without an API call
+    // (generate() rejects empty text) — this pins that contract.
+    const text = "A".repeat(1199) + "။ ";
+    const chunks = chunkText(text, 1200);
+    expect(chunks.length).toBe(2);
+    expect(chunks[0]).toBe("A".repeat(1199) + "။");
+    expect(chunks.at(-1)).toBe(" ");
+    expect(chunks.join("")).toBe(text);
+  });
+
   it("respects the max length", () => {
     const text = Array.from({ length: 30 }, () => SENT).join("");
     const chunks = chunkText(text, 300);

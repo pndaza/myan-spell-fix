@@ -16,6 +16,7 @@
     type Suggestion,
     type FixResult,
     type SuggestResult,
+    resolveModel,
   } from "./lib/spellfix";
   import { currentTheme, setTheme, nextTheme, resolveTheme, type Theme } from "./theme";
 
@@ -243,6 +244,11 @@
     themePref = setTheme(nextTheme(themePref));
   }
 
+  /** Human elapsed time for the result header ("1.6 s", not "1593 ms"). */
+  function fmtMs(ms: number): string {
+    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+  }
+
   function openKeyPanel() {
     keyDraft = apiKey;
     keyPanelDismissed = false;
@@ -320,6 +326,16 @@
         parts,
         POOL,
         async (part) => {
+          // A whitespace-only part (e.g. the trailing space after a final
+          // chunk that filled exactly) has nothing to fix — pass it through
+          // instead of letting generate()'s "empty" error mark the run
+          // partial. Join-invariant assembly keeps the document identical.
+          if (part.trim().length === 0) {
+            progress = { done: progress.done + 1, total: parts.length };
+            return mode === "auto"
+              ? ({ corrected: part, model: resolveModel(model), parseMode: "json", ms: 0 } as FixResult)
+              : ({ fixes: [], ms: 0 } as SuggestResult);
+          }
           const r = await runChunk(part);
           progress = { done: progress.done + 1, total: parts.length };
           return r;
@@ -370,7 +386,7 @@
         }
         if (partial > 0) {
           showToast(
-            `${partial} အပိုင်း မအောင်မြင်ပါ — မူလစာသားအတိုင်း ထားခဲ့သည် (${partial} chunk(s) failed — original kept)`,
+            `${partial} ပိုင်း မအောင်မြင်ပါ — မူလစာသားအတိုင်း ထားခဲ့သည် (${partial} chunk(s) failed — original kept)`,
           );
         }
       }
@@ -502,6 +518,7 @@
 
   function onDragEnter(e: DragEvent) {
     e.preventDefault();
+    if (phase !== "edit") return; // don't swap the text mid-run
     dragDepth++;
     dragging = true;
   }
@@ -519,6 +536,7 @@
     e.preventDefault();
     dragDepth = 0;
     dragging = false;
+    if (phase !== "edit") return; // don't swap the text mid-run
     const file = e.dataTransfer?.files?.[0];
     if (file) void loadTextFile(file);
   }
@@ -575,6 +593,17 @@
     } catch {
       return false;
     }
+  }
+
+  /** Arrow keys move between the result tabs (tabs-pattern keyboard
+   *  support); focus follows the newly active tab. */
+  function onTablistKey(e: KeyboardEvent) {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    view = view === "diff" ? "clean" : "diff";
+    document
+      .getElementById(view === "diff" ? "tab-diff" : "tab-clean")
+      ?.focus();
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -643,7 +672,7 @@
         aria-label="AI model"
       >
         {#each MODELS as m (m.key)}
-          <option value={m.key}>{m.label}</option>
+          <option value={m.key}>{m.label} ({m.freeRpd}/day)</option>
         {/each}
       </select>
       <button
@@ -654,8 +683,8 @@
         aria-label="API key settings"
       >
         <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="7.5" cy="15.5" r="4.5" />
-          <path d="m10.7 12.3 8.3-8.3m0 0h-4.5m4.5 0v4.5" />
+          <path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
+          <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" />
         </svg>
       </button>
       <button class="btn icon" onclick={cycleTheme} title={themePref === "light" ? "Light" : themePref === "dark" ? "Dark" : "System"} aria-label={`Theme: ${themePref}`}>
@@ -745,19 +774,40 @@
 
     {#if phase === "edit" || phase === "fixing"}
       <div class="card">
+        {#if phase === "fixing"}
+          <div class="fixing">
+            <div class="status">
+              <span class="spinner" aria-hidden="true"></span>
+              <span>
+                စစ်ဆေးနေသည်… {progress.done} / {progress.total}
+              </span>
+              <span class="grow" style="flex:1"></span>
+              <button class="btn" onclick={cancel}>
+                <span class="mm">ရပ်မည်</span>
+              </button>
+            </div>
+            {#if pauseNote}
+              <div class="pause-note">{pauseNote}</div>
+            {/if}
+            <div class="progress" role="progressbar" aria-label="စစ်ဆေးမှု တိုးတက်မှု" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
+              <i style="width: {progressPct}%"></i>
+            </div>
+          </div>
+        {/if}
+        <textarea
+          class="editor"
+          class:dragover={dragging}
+          bind:value={input}
+          disabled={phase === "fixing"}
+          placeholder="မြန်မာစာ ရိုက်ထည့်ပါ၊ ကူးထည့်ပါ သို့မဟုတ် .txt ဖိုင်ကို ဤနေရာတွင် ချထားပါ…"
+          spellcheck="false"
+          aria-label="မြန်မာစာသား ထည့်ရန်"
+          ondragenter={onDragEnter}
+          ondragleave={onDragLeave}
+          ondragover={onDragOver}
+          ondrop={onDrop}
+        ></textarea>
         {#if phase === "edit"}
-          <textarea
-            class="editor"
-            class:dragover={dragging}
-            bind:value={input}
-            placeholder="မြန်မာစာ ရိုက်ထည့်ပါ၊ ကူးထည့်ပါ သို့မဟုတ် .txt ဖိုင်ကို ဤနေရာတွင် ချထားပါ…"
-            spellcheck="false"
-            aria-label="မြန်မာစာသား ထည့်ရန်"
-            ondragenter={onDragEnter}
-            ondragleave={onDragLeave}
-            ondragover={onDragOver}
-            ondrop={onDrop}
-          ></textarea>
           <div class="bar">
             <span
               class="count"
@@ -768,6 +818,14 @@
             >
               {input.length.toLocaleString("en-US")} လုံး · ≈{estRequests} request
             </span>
+            {#if overQuota}
+              <span
+                class="badge warn"
+                title={`ရွေးထားသော model ၏ နေ့စဉ်အခမဲ့ quota (${modelQuota}) ထက် ပိုနိုင်သည် — အခြား model သို့ ပြောင်းကြည့်ပါ`}
+              >
+                quota ပိုနိုင်သည်
+              </span>
+            {/if}
             <input
               type="file"
               accept={FILE_ACCEPT}
@@ -798,29 +856,12 @@
               class="btn primary"
               onclick={runFix}
               disabled={!canFix}
-              title="Ctrl/⌘ + Enter"
+              title={!apiKey.trim()
+                ? "API key ထည့်ပြီးမှ စတင်နိုင်သည် — add your API key first"
+                : "Ctrl/⌘ + Enter"}
             >
               <span class="mm">စာလုံးပြင်မည်</span>
             </button>
-          </div>
-        {:else}
-          <div class="fixing">
-            <div class="status">
-              <span class="spinner" aria-hidden="true"></span>
-              <span>
-                စစ်ဆေးနေသည်… {progress.done} / {progress.total}
-              </span>
-              <span class="grow" style="flex:1"></span>
-              <button class="btn" onclick={cancel}>
-                <span class="mm">ရပ်မည်</span>
-              </button>
-            </div>
-            {#if pauseNote}
-              <div class="pause-note">{pauseNote}</div>
-            {/if}
-            <div class="progress" role="progressbar" aria-label="စစ်ဆေးမှု တိုးတက်မှု" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
-              <i style="width: {progressPct}%"></i>
-            </div>
           </div>
         {/if}
       </div>
@@ -837,11 +878,11 @@
               <b>{checkedRows.length}</b> ခု
             {/if}
             {#if partial > 0}
-              <span class="badge warn" title={`${partial} အပိုင်း စစ်ဆေး၍ မရပါ — မူလစာသားအတိုင်း ထားခဲ့သည်`}>
-                {partial} အပိုင်း ကျန်
+              <span class="badge warn" title={`${partial} ပိုင်း စစ်ဆေး၍ မရပါ — မူလစာသားအတိုင်း ထားခဲ့သည်`}>
+                {partial} ပိုင်း ကျန်
               </span>
             {/if}
-            <span class="ms">{elapsed} ms</span>
+            <span class="ms">{fmtMs(elapsed)}</span>
           </div>
           {#if suggestions.length > 0}
             <button class="btn" onclick={toggleAllSuggestions}>
@@ -927,13 +968,13 @@
               ပြင်ဆင်ချက် <b>{editCount}</b> ခု
             {/if}
             {#if partial > 0}
-              <span class="badge warn" title={`${partial} အပိုင်း စစ်ဆေး၍ မရပါ — မူလစာသားအတိုင်း ထားခဲ့သည် (failed chunks kept their original text)`}>
-                {partial} အပိုင်း ကျန်
+              <span class="badge warn" title={`${partial} ပိုင်း စစ်ဆေး၍ မရပါ — မူလစာသားအတိုင်း ထားခဲ့သည် (failed chunks kept their original text)`}>
+                {partial} ပိုင်း ကျန်
               </span>
             {/if}
-            <span class="ms">{elapsed} ms</span>
+            <span class="ms">{fmtMs(elapsed)}</span>
           </div>
-          <div class="tabs" role="tablist">
+          <div class="tabs" role="tablist" tabindex="-1" onkeydown={onTablistKey}>
             <button
               class:active={view === "diff"}
               onclick={() => (view = "diff")}
@@ -941,6 +982,7 @@
               id="tab-diff"
               aria-controls="result-panel"
               aria-selected={view === "diff"}
+              tabindex={view === "diff" ? 0 : -1}
             >
               ကွာခြားချက်
             </button>
@@ -951,6 +993,7 @@
               id="tab-clean"
               aria-controls="result-panel"
               aria-selected={view === "clean"}
+              tabindex={view === "clean" ? 0 : -1}
             >
               စာသား
             </button>
@@ -959,7 +1002,14 @@
 
         <!-- The each/if must stay on one line: inside <pre>, Svelte preserves
              whitespace, so any formatting newline would render as a gap. -->
-        <pre class="out" id="result-panel" aria-label="ရလဒ် — result">{#if view === "diff"}{#each diffSegs as seg, i (i)}{#if seg.type === "same"}{seg.text}{:else if seg.type === "del"}<span class="del">{seg.text}</span>{:else}<span class="add">{seg.text}</span>{/if}{/each}{:else}{result}{/if}</pre>
+        <div
+          class="panelwrap"
+          id="result-panel"
+          role="tabpanel"
+          aria-labelledby={view === "diff" ? "tab-diff" : "tab-clean"}
+        ><!--
+          --><pre class="out">{#if view === "diff"}{#each diffSegs as seg, i (i)}{#if seg.type === "same"}{seg.text}{:else if seg.type === "del"}<span class="del">{seg.text}</span>{:else}<span class="add">{seg.text}</span>{/if}{/each}{:else}{result}{/if}</pre>
+        </div>
 
         <div class="bar">
           <button class="btn primary" onclick={copyResult}>

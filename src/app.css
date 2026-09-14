@@ -18,10 +18,14 @@
   --accent: #ffb86b;
   --accent-dim: #c98a3f;
   --accent-soft: rgba(255, 184, 107, 0.12);
-  --danger: #ff6b6b;
+  /* accent for TEXT and outlines (logo, focus ring, cursor fragments).
+     Same as --accent here; the light theme darkens it because #c9761f
+     on cream is under 3:1. */
+  --accent-ink: var(--accent);
+  --danger: #ff7d7d;
   --ok: #8bd88b;
   --ok-soft: rgba(139, 216, 139, 0.12);
-  --danger-soft: rgba(255, 107, 107, 0.1);
+  --danger-soft: rgba(255, 125, 125, 0.1);
   --overlay: rgba(0, 0, 0, 0.55);
   --radius: 12px;
   --radius-sm: 8px;
@@ -48,10 +52,12 @@
   --accent: #c9761f;
   --accent-dim: #a85f12;
   --accent-soft: rgba(201, 118, 31, 0.12);
-  --danger: #c83838;
-  --ok: #16a34a;
-  --ok-soft: rgba(22, 163, 74, 0.14);
-  --danger-soft: rgba(200, 56, 56, 0.1);
+  /* text/outline accent: #c9761f on cream is 2.77:1; #b45f09 is 3.69+ */
+  --accent-ink: #b45f09;
+  --danger: #a81f1f;
+  --ok: #166534;
+  --ok-soft: rgba(22, 101, 52, 0.14);
+  --danger-soft: rgba(168, 31, 31, 0.1);
   --overlay: rgba(40, 30, 20, 0.45);
   color-scheme: light;
 }
@@ -67,6 +73,11 @@ body {
   background: var(--bg);
 }
 
+/* keep the layout steady when an error banner makes the page scrollable */
+html {
+  scrollbar-gutter: stable;
+}
+
 #app {
   min-height: 100vh;
   display: flex;
@@ -78,7 +89,7 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-ink);
   outline-offset: 1px;
 }
 
@@ -141,7 +152,7 @@ input:focus {
   border-radius: 11px;
   background: var(--bg-inset);
   border: 1px solid var(--border);
-  color: var(--accent);
+  color: var(--accent-ink);
   font-family: var(--my);
   font-weight: 700;
   font-size: 18px; /* two Padauk glyphs (စာ) — fits the 42px box with padding */
@@ -171,6 +182,9 @@ input:focus {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* narrow screens: the selects + icon buttons wrap to a second row
+     instead of overflowing the viewport horizontally */
+  flex-wrap: wrap;
 }
 
 /* ── buttons ───────────────────────────────────────────────────────── */
@@ -231,7 +245,7 @@ input:focus {
 
 /* the key button glows softly until a key is saved */
 .btn.icon.attention {
-  color: var(--accent);
+  color: var(--accent-ink);
   border-color: var(--accent-dim);
 }
 
@@ -244,6 +258,8 @@ input:focus {
 
 main {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   padding-bottom: 24px;
 }
 
@@ -253,6 +269,17 @@ main {
   border-radius: var(--radius);
   padding: 18px;
   animation: rise 0.18s ease;
+}
+
+/* content cards stretch to fill the viewport: the editor, diff, and
+   suggest panels become the tool surface instead of a short form
+   floating above dead space. :has keeps plain cards (the key panel,
+   the empty no-suggestions state) at their natural height. */
+main > .card:has(.editor, .out, .panels) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 @keyframes rise {
@@ -270,8 +297,9 @@ main {
 
 .editor {
   width: 100%;
-  min-height: 300px;
-  resize: vertical;
+  min-height: 220px;
+  flex: 1;
+  resize: none; /* the card stretches instead — manual resize fought flex */
   font-family: var(--my);
   font-size: 17px;
   line-height: 1.95; /* Myanmar stacks need generous leading */
@@ -279,9 +307,14 @@ main {
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 14px 16px;
+  padding: 14px 16px 24px; /* extra bottom: tall stacks clip mid-glyph at the scroll edge */
   outline: none;
   overflow-wrap: anywhere;
+}
+
+/* the text stays visible (read-only) while a run is in flight */
+.editor:disabled {
+  opacity: 0.7;
 }
 
 .editor:focus {
@@ -323,11 +356,14 @@ main {
 
 /* progress */
 
+/* status strip shown ABOVE the (disabled) editor while a run is in
+   flight — the user keeps sight of the text being processed */
 .fixing {
   display: flex;
   flex-direction: column;
   gap: 14px;
   align-items: flex-start;
+  margin-bottom: 14px;
 }
 
 .fixing .status {
@@ -341,9 +377,11 @@ main {
 
 .progress {
   width: 100%;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--bg-inset);
+  height: 6px;
+  border-radius: 3px;
+  /* border color, not surface: at 0% the track must read clearly
+     against the card or the bar doesn't exist until the first chunk */
+  background: var(--border);
   overflow: hidden;
 }
 
@@ -362,7 +400,7 @@ main {
   display: block;
   height: 100%;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: 3px;
   transition: width 0.25s ease;
 }
 
@@ -512,6 +550,14 @@ main {
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
+/* the tabpanel wrapper around the result <pre>: carries the ARIA role
+   (a <pre> can't) and forwards the flex sizing to the pre inside */
+.panelwrap {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .out {
   font-family: var(--my);
   font-size: 17px;
@@ -519,18 +565,23 @@ main {
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 14px 16px;
+  padding: 14px 16px 24px;
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 55vh;
+  flex: 1; /* fills the card; scrolls internally instead of capping at 55vh */
+  min-height: 160px;
   overflow-y: auto;
 }
 
+/* bold: diff fragments are often 1–2 glyph clusters; weight makes the
+   red side readable instead of a colored blip */
 .out .del {
   color: var(--danger);
   background: var(--danger-soft);
   border-radius: 3px;
+  padding: 0 3px;
+  font-weight: 700;
   text-decoration: line-through;
   text-decoration-thickness: 1.5px;
 }
@@ -539,6 +590,8 @@ main {
   color: var(--ok);
   background: var(--ok-soft);
   border-radius: 3px;
+  padding: 0 3px;
+  font-weight: 700;
 }
 
 .out .gap {
@@ -553,6 +606,8 @@ main {
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   align-items: stretch;
+  flex: 1; /* fills the card next to the action bar */
+  min-height: 240px;
 }
 
 .panel {
@@ -560,6 +615,7 @@ main {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
 }
 
 .panel-label {
@@ -577,14 +633,13 @@ main {
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 12px 14px;
+  padding: 12px 14px 22px;
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   overflow-y: auto;
   flex: 1;
   min-height: 120px;
-  max-height: 52vh;
 }
 
 /* flagged fragments in the original text: red = will be fixed,
@@ -605,7 +660,7 @@ main {
 
 /* the cursor row's fragments: accent outline on top of the on/off tint */
 .flag.cur {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--accent-ink);
   outline-offset: -1px;
 }
 
@@ -617,11 +672,14 @@ main {
   white-space: nowrap;
 }
 
-/* the fix list lives inside the right panel — it stretches with it
-   instead of using its own fixed cap */
+/* the fix list lives inside the right panel — a filled, bordered box
+   like the text panel so both columns stretch and read as panels */
 .panel .suglist {
   flex: 1;
-  max-height: 52vh;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
   overflow-y: auto;
 }
 
@@ -634,7 +692,6 @@ main {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 50vh;
   overflow-y: auto;
 }
 
@@ -689,6 +746,7 @@ main {
   background: var(--danger-soft);
   border-radius: 3px;
   padding: 0 3px;
+  font-weight: 700;
   text-decoration: line-through;
   text-decoration-thickness: 1.5px;
 }
@@ -698,6 +756,7 @@ main {
   background: var(--ok-soft);
   border-radius: 3px;
   padding: 0 3px;
+  font-weight: 700;
 }
 
 .badge {
@@ -742,7 +801,7 @@ footer {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 28px;
+  bottom: 64px; /* clears the footer line instead of printing over it */
   transform: translate(-50%, 8px);
   background: var(--surface);
   border: 1px solid var(--border-strong);
@@ -777,9 +836,17 @@ footer {
   .brand .tag {
     display: none;
   }
-  .out {
-    max-height: 60vh;
+  /* comfortable touch targets once the controls wrap */
+  .btn.icon {
+    min-width: 44px;
+    min-height: 44px;
   }
+}
+
+/* the quota badge sits next to the counter, not pushed to the far
+   right like the list badges (which use margin-left: auto) */
+.bar .badge {
+  margin-left: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {
