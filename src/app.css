@@ -425,9 +425,9 @@ main > .card:has(.editor, .out, .panels) {
 .chunk-note {
   position: absolute;
   bottom: calc(100% + 8px);
-  right: 0;
+  left: 0;
   width: max-content;
-  max-width: 300px;
+  max-width: min(340px, calc(100vw - 60px));
   z-index: 3;
   font-family: var(--my);
   font-size: 12.5px;
