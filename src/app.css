@@ -404,7 +404,9 @@ main > .card:has(.editor, .out, .panels) {
 .chunkpick select {
   font-family: var(--my);
   max-width: none;
-  padding: 5px 8px;
+  /* asymmetric: Padauk's tall ascent reserves headroom the plain syllables
+     don't use, so a symmetric padding parks the ink low — lift it ~1px */
+  padding: 4px 8px 6px;
   font-size: 12.5px;
 }
 
