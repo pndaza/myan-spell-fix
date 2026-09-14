@@ -48,16 +48,50 @@ function tokenize(text: string): string[] {
   const out: string[] = [];
   for (const tok of text.split(/(\s+)/)) {
     if (!tok) continue;
-    if (MYANMAR.test(tok)) out.push(...clusters(tok));
-    else out.push(tok);
+    if (MYANMAR.test(tok)) {
+      // loop, not spread: Burmese is unspaced, so a whitespace-free run
+      // (text pasted from a PDF) is one huge token — push(...clusters(tok))
+      // would pass every cluster as a call argument and overflow the stack
+      for (const c of clusters(tok)) out.push(c);
+    } else out.push(tok);
   }
   return out;
 }
 
-/** Upper bound on DP-table cells (n·m) — ~16M cells ≈ 130 MB, comfortably
- *  interactive for documents up to ~8k chars. Above it, fall back to a
- *  coarse whole-region diff rather than allocating a table that could
- *  freeze the tab (batched input can now be arbitrarily long). */
+/** Cut point for halving a too-big region: the paragraph/section/space
+ *  boundary closest to the middle — accepted only when it lands within the
+ *  middle half of the string, so both halves shrink geometrically and
+ *  recursion depth stays logarithmic. With no usable boundary, the exact
+ *  middle, nudged to keep a surrogate pair in one half. */
+function splitPoint(s: string): number {
+  const mid = s.length >> 1;
+  let best = -1;
+  let bestDist = Infinity;
+  for (const sep of ["\n", "\u104B", " "]) {
+    const consider = (at: number) => {
+      const cut = at + sep.length;
+      if (cut <= 0 || cut >= s.length) return; // both halves must be non-empty
+      const d = Math.abs(cut - mid);
+      if (d < bestDist) {
+        best = cut;
+        bestDist = d;
+      }
+    };
+    const before = s.lastIndexOf(sep, mid);
+    if (before !== -1) consider(before);
+    const after = s.indexOf(sep, mid);
+    if (after !== -1) consider(after);
+  }
+  if (best !== -1 && bestDist <= s.length >> 2) return best;
+  const prev = s.charCodeAt(mid - 1);
+  return prev >= 0xd800 && prev <= 0xdbff && mid + 1 < s.length ? mid + 1 : mid;
+}
+
+/** Upper bound on DP-table cells (n·m) — 16M cells = 32 MB as one flat
+ *  Uint16Array, comfortably interactive for documents up to ~8k chars.
+ *  Above it, the region is split at a boundary near its middle and the
+ *  halves are diffed recursively, so arbitrarily long batched input still
+ *  gets localized diffs instead of one coarse blob. */
 const MAX_DP_CELLS = 16_000_000;
 
 /**
@@ -99,20 +133,36 @@ export function diffWords(a: string, b: string): DiffSeg[] {
   const m = midB.length;
 
   if (n * m > MAX_DP_CELLS) {
-    // coarse fallback: too different to diff finely — show one replacement
-    if (n > 0) push("del", midA.join(""));
-    if (m > 0) push("add", midB.join(""));
+    // Too different to DP at this granularity. One coarse del+add blob
+    // would hide where the changes are, so split both mid-regions near
+    // their middles and diff the halves: every level shrinks the regions,
+    // the recursion bottoms out in DP-able pieces, and distant edits stay
+    // localized. Concatenating the half-diffs rebuilds both texts exactly.
+    const aStr = midA.join("");
+    const bStr = midB.join("");
+    const aCut = splitPoint(aStr);
+    const bCut = splitPoint(bStr);
+    for (const seg of diffWords(aStr.slice(0, aCut), bStr.slice(0, bCut))) {
+      push(seg.type, seg.text);
+    }
+    for (const seg of diffWords(aStr.slice(aCut), bStr.slice(bCut))) {
+      push(seg.type, seg.text);
+    }
   } else {
-    // dp[i][j] = LCS length of midA[i..] vs midB[j..]
-    const dp: number[][] = Array.from({ length: n + 1 }, () =>
-      new Array<number>(m + 1).fill(0),
-    );
+    // dp[i * w + j] = LCS length of midA[i..] vs midB[j..]. Cell values
+    // are at most min(n, m) ≤ √MAX_DP_CELLS = 4000, so 16-bit cells
+    // suffice — one flat typed array is far faster and lighter than an
+    // array of per-row arrays (32 MB vs ~130 MB at the cap).
+    const w = m + 1;
+    const dp = new Uint16Array((n + 1) * w);
     for (let i = n - 1; i >= 0; i--) {
+      const row = i * w;
+      const next = row + w;
       for (let j = m - 1; j >= 0; j--) {
-        dp[i][j] =
+        dp[row + j] =
           midA[i] === midB[j]
-            ? dp[i + 1][j + 1] + 1
-            : Math.max(dp[i + 1][j], dp[i][j + 1]);
+            ? dp[next + j + 1] + 1
+            : Math.max(dp[next + j], dp[row + j + 1]);
       }
     }
     let i = 0;
@@ -122,7 +172,7 @@ export function diffWords(a: string, b: string): DiffSeg[] {
         push("same", midA[i]);
         i++;
         j++;
-      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      } else if (dp[(i + 1) * w + j] >= dp[i * w + j + 1]) {
         push("del", midA[i]);
         i++;
       } else {
@@ -135,6 +185,20 @@ export function diffWords(a: string, b: string): DiffSeg[] {
   }
   if (tail) push("same", tail);
   return segs;
+}
+
+/** Concatenate segment runs into one, merging adjacent same-type pieces —
+ *  how per-chunk diffs become a single renderable document diff. */
+export function mergeSegs(runs: DiffSeg[][]): DiffSeg[] {
+  const out: DiffSeg[] = [];
+  for (const run of runs) {
+    for (const s of run) {
+      const last = out[out.length - 1];
+      if (last && last.type === s.type) last.text += s.text;
+      else out.push({ ...s });
+    }
+  }
+  return out;
 }
 
 /**

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { mapPool, withRetries } from "./lib/batch";
   import { chunkText } from "./lib/chunk";
-  import { diffWords, countEdits } from "./lib/diff";
+  import { diffWords, countEdits, mergeSegs, type DiffSeg } from "./lib/diff";
   import { normalizeText } from "./lib/filetext";
-  import { highlightText } from "./lib/highlight";
+  import { scanFlags, renderFlags, countOccurrences } from "./lib/highlight";
   import {
     fixText,
     suggestFixes,
@@ -111,6 +111,13 @@
   let phase = $state<Phase>("edit");
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
+  /** Auto mode: per-chunk diff segments, merged in document order. Diffing
+   *  each ≤ CHUNK-char part against its own correction keeps every DP
+   *  table tiny at any document size — one whole-document diff would
+   *  exceed the DP cap (one coarse blob) once the edited middle grows
+   *  past ~8k chars. Null in manual mode (applied fixes diff as a whole,
+   *  localized by diffWords' own split-and-recurse). */
+  let chunkSegs = $state<DiffSeg[] | null>(null);
   let suggestions = $state<SugRow[]>([]);
   /** Keyboard-cursor row in the suggest list (↑/↓). Its fragments carry
    *  the `cur` highlight in the text panel and the left indicator in the
@@ -164,20 +171,35 @@
   });
   const overQuota = $derived(estRequests > modelQuota);
   const diffSegs = $derived(
-    result !== null ? diffWords(input, result) : [],
+    chunkSegs !== null
+      ? chunkSegs
+      : result !== null
+        ? diffWords(input, result)
+        : [],
   );
   const editCount = $derived(countEdits(diffSegs));
+  /** Fragment occurrences in the original text — the expensive scan (cost
+   *  scales with text × rows), run once per suggestion set. Tracks only
+   *  wrong/found, NOT checked/cursor: toggles and arrow keys must not
+   *  rescan a whole document. */
+  const flagScan = $derived(
+    phase === "suggest"
+      ? scanFlags(
+          input,
+          suggestions.map((s) => ({ wrong: s.wrong, found: s.found })),
+        )
+      : null,
+  );
   /** Original text with flagged fragments highlighted — the LEFT panel of
    *  manual mode's review. Live-updates as rows are checked/unchecked and
-   *  as the keyboard cursor moves. */
+   *  as the keyboard cursor moves; only the cheap render step re-runs. */
   const textSegs = $derived(
-    phase === "suggest"
-      ? highlightText(
+    flagScan !== null
+      ? renderFlags(
           input,
+          flagScan,
           suggestions.map((s, i) => ({
-            wrong: s.wrong,
             checked: s.checked,
-            found: s.found,
             current: i === cursor,
           })),
         )
@@ -280,6 +302,7 @@
     phase = "fixing";
     error = null;
     result = null;
+    chunkSegs = null;
     suggestions = [];
     partial = 0;
     pauseNote = null;
@@ -364,12 +387,14 @@
         if (mode === "auto") {
           // failed chunks keep their original text — a partial fix, not a
           // broken one (failed spots stay visible in the diff view)
-          result = parts
-            .map((p, i) => {
-              const r = outcome.results[i];
-              return r && "corrected" in r ? r.corrected : p;
-            })
-            .join("");
+          const correctedParts = parts.map((p, i) => {
+            const r = outcome.results[i];
+            return r && "corrected" in r ? r.corrected : p;
+          });
+          result = correctedParts.join("");
+          chunkSegs = mergeSegs(
+            correctedParts.map((c, i) => diffWords(parts[i], c)),
+          );
           view = "diff";
           phase = "review";
         } else {
@@ -417,7 +442,9 @@
       const key = `${p.wrong}→${p.correct}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const count = text.split(p.wrong).length - 1;
+      // indexOf counting, not split: split allocates every piece, which
+      // explodes when a common fragment occurs often in a long document
+      const count = countOccurrences(text, p.wrong);
       rows.push({ ...p, count, found: count > 0, checked: count > 0 });
     }
     return rows;
@@ -437,6 +464,7 @@
       );
     }
     result = outcome.text;
+    chunkSegs = null;
     view = "diff";
     phase = "review";
   }
@@ -544,6 +572,7 @@
   function backToEdit() {
     phase = "edit";
     result = null;
+    chunkSegs = null;
     suggestions = [];
     partial = 0;
     pauseNote = null;
@@ -557,6 +586,7 @@
     if (result === null) return;
     input = result;
     result = null;
+    chunkSegs = null;
     error = null;
     partial = 0;
     phase = "edit";

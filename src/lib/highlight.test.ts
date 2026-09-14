@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { highlightText, type FlagSource } from "./highlight";
+import {
+  countOccurrences,
+  highlightText,
+  renderFlags,
+  scanFlags,
+  type FlagSource,
+} from "./highlight";
 
 const TEXT = "မြနာမာနိုင်ငံဖစ်သည်။ မြနာမာ လူမျိုးများ။";
 
@@ -82,5 +88,59 @@ describe("highlightText", () => {
     const cur = segs.filter((s) => s.cur === true);
     expect(cur).toHaveLength(1);
     expect(cur[0].text).toBe("ဖစ်သည်");
+  });
+
+  it("cursor fallback stays scoped to the current row — unrelated rows stay unlit", () => {
+    // three rows: the cursor row loses every overlap, another row wins at
+    // the same spots, and a THIRD row wins elsewhere in the document. Only
+    // the ranges covering the cursor row's lost fragments may light up.
+    const text = "ဖစ်သည်။ ခးန်းရှိသည်။ ဖစ်သည်။";
+    const rows: FlagSource[] = [
+      { wrong: "ဖစ်", checked: true, found: true, current: true }, // loses to row 1
+      { wrong: "ဖစ်သည်", checked: true, found: true }, // wins twice
+      { wrong: "ခးန်း", checked: true, found: true }, // wins elsewhere
+    ];
+    const cur = highlightText(text, rows).filter((s) => s.cur === true);
+    expect(cur.map((s) => s.text)).toEqual(["ဖစ်သည်", "ဖစ်သည်"]);
+  });
+});
+
+describe("scanFlags + renderFlags", () => {
+  it("compose to exactly highlightText's output", () => {
+    const rows: FlagSource[] = [
+      { wrong: "မြနာမာ", checked: true, found: true, current: true },
+      { wrong: "ဖစ်", checked: false, found: true },
+      { wrong: "မရှိသောဖွင့်", checked: true, found: false },
+    ];
+    expect(renderFlags(TEXT, scanFlags(TEXT, rows), rows)).toEqual(
+      highlightText(TEXT, rows),
+    );
+  });
+
+  it("re-renders a scan with new check/cursor state without rescanning", () => {
+    const scan = scanFlags(TEXT, [row("မြနာမာ"), row("ဖစ်")]);
+    const before = renderFlags(TEXT, scan, [
+      { checked: true, current: false },
+      { checked: true, current: true },
+    ]);
+    expect(before.filter((s) => s.type === "off")).toHaveLength(0);
+    // toggle မြနာမာ off, move the cursor to it — same scan, new render
+    const after = renderFlags(TEXT, scan, [
+      { checked: false, current: true },
+      { checked: true, current: false },
+    ]);
+    expect(after.filter((s) => s.type === "off").every((s) => s.text === "မြနာမာ")).toBe(true);
+    expect(after.filter((s) => s.type === "on").every((s) => s.text === "ဖစ်")).toBe(true);
+    expect(after.filter((s) => s.cur === true).every((s) => s.text === "မြနာမာ")).toBe(true);
+    expect(after.map((s) => s.text).join("")).toBe(TEXT);
+  });
+});
+
+describe("countOccurrences", () => {
+  it("counts overlapping-free occurrences like split().length - 1", () => {
+    expect(countOccurrences("ကာကာကာ", "ကာ")).toBe(3);
+    expect(countOccurrences("မြနာမာနိုင်ငံဖစ်သည်။ မြနာမာ လူမျိုးများ။", "မြနာမာ")).toBe(2);
+    expect(countOccurrences("abc", "ခ")).toBe(0);
+    expect(countOccurrences("abc", "")).toBe(0); // guard, never loops
   });
 });

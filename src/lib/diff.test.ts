@@ -65,13 +65,14 @@ describe("diffWords", () => {
     expect(same).toBe(head + "စ်သည်။"); // only the ဖ→ဖြ syllable differs
   });
 
-  it("falls back to a coarse diff above the DP cap without losing text", () => {
-    // force the coarse path: enough distinct tokens on both sides to blow
-    // past MAX_DP_CELLS (16M) while sharing nothing
+  it("diffs above the DP cap without losing text (split-and-recurse)", () => {
+    // enough distinct tokens on both sides to blow past MAX_DP_CELLS (16M)
+    // while sharing nothing but the spaces between words — the region is
+    // split at the middle and each half diffs finely
     const a = Array.from({ length: 4200 }, (_, i) => `a${i}`).join(" ");
     const b = Array.from({ length: 4200 }, (_, i) => `b${i}`).join(" ");
     const segs = diffWords(a, b);
-    expect(countEdits(segs)).toBe(1); // one replacement
+    expect(countEdits(segs)).toBe(4200); // one replacement per word token
     expect(segs.filter((s) => s.type === "del").map((s) => s.text).join(" ")).toBe(a);
     expect(segs.filter((s) => s.type === "add").map((s) => s.text).join(" ")).toBe(b);
   });
@@ -84,6 +85,34 @@ describe("diffWords", () => {
     const b = a.split("မြနာမာ").join("မြန်မာ");
     expect(a.length).toBeGreaterThan(4000);
     expect(countEdits(diffWords(a, b))).toBe(40); // one per paragraph
+  });
+
+  it("does not blow the stack on a huge whitespace-free token", () => {
+    // PDF-paste shaped: Burmese is unspaced, so a whole document can
+    // arrive as ONE token — tokenize must not spread it as call arguments
+    const tok = "ကော".repeat(150_000);
+    const segs = diffWords(tok, tok + "ာ");
+    expect(segs.filter((s) => s.type === "add").map((s) => s.text).join("")).toContain("ာ");
+    expect(segs.filter((s) => s.type !== "add").map((s) => s.text).join("")).toBe(tok);
+  });
+
+  it("keeps distant edits separate above the DP cap (split-and-recurse)", () => {
+    // ~14k chars: the region between the first and last edit exceeds the
+    // DP cap. The old coarse fallback showed ONE del+add blob; splitting
+    // at the middle and recursing localizes both edits.
+    const para = "မြနာမာနိုင်ငံသည် အရှေ့တောင်အာရှဒေသတွင် တည်ရှိသည်။ နိုင်ငံ၏ မြို့တော်မှာ နေပြည်တော်ဖစ်သည်။ လူမျိုးပေါင်းစုံ အတူတကွ နေထိုင်ကြသည်။";
+    const paras = Array.from({ length: 100 }, () => para);
+    const fixed = [...paras];
+    fixed[0] = paras[0].split("မြနာမာ").join("မြန်မာ"); // first paragraph
+    fixed[99] = paras[99].split("ဖစ်").join("ဖြစ်"); // last paragraph
+    const a = paras.join("\n");
+    const b = fixed.join("\n");
+    expect(a.length).toBeGreaterThan(10_000);
+    const segs = diffWords(a, b);
+    expect(countEdits(segs)).toBe(2);
+    // round-trip still holds through the recursive fallback
+    expect(segs.filter((s) => s.type !== "add").map((s) => s.text).join("")).toBe(a);
+    expect(segs.filter((s) => s.type !== "del").map((s) => s.text).join("")).toBe(b);
   });
 });
 
