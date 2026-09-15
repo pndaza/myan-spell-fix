@@ -36,6 +36,8 @@ inline diff, copy the clean result.
   outline in the text panel, auto-scrolled into view), **Space** toggles
   the row, **Enter** applies, **Esc** backs out; **⌘/Ctrl+Enter** runs a
   fix from the editor
+- Result actions: copy to clipboard, or **ဖိုင်သိမ်းမည်** — export the
+  corrected text as a date-stamped `.txt` download
 - Handles long documents with **no input cap**: text is split at sentence
   (။) and clause (၊) boundaries into AI-sized chunks, processed as
   concurrent batches (3 at a time) with live progress. Chunk size is

@@ -699,6 +699,27 @@
     }
   }
 
+  /** Download the corrected text as a .txt file — the round trip back to
+   *  the user's disk (cf. ဖိုင်ဖွင့်မည် in). Date-stamped so successive
+   *  exports don't overwrite each other. */
+  function exportResult() {
+    if (result === null) return;
+    const d = new Date();
+    const stamp = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, "0"),
+      String(d.getDate()).padStart(2, "0"),
+    ].join("-");
+    const blob = new Blob([result], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `myan-spell-fix-${stamp}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("ဖိုင် သိမ်းပြီးပါပြီ — Exported");
+  }
+
   function legacyCopy(text: string): boolean {
     try {
       const ta = document.createElement("textarea");
@@ -1239,6 +1260,9 @@
         <div class="bar">
           <button class="btn primary" onclick={copyResult}>
             <span class="mm">ကူးယူမည်</span>
+          </button>
+          <button class="btn" onclick={exportResult} title="ချိန်းပြီးသည့် စာသားကို .txt ဖိုင်အဖြစ် သိမ်းမည် — Export as .txt">
+            <span class="mm">ဖိုင်သိမ်းမည်</span>
           </button>
           <button class="btn" onclick={fixAgain} title="Run another pass on the corrected text">
             <span class="mm">ထပ်စစ်မည်</span>
