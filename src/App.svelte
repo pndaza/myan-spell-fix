@@ -127,6 +127,7 @@
    *  automatically when there's no key (until dismissed); reopened via the
    *  header button. */
   let keyDraft = $state("");
+  let keyInput = $state<HTMLInputElement | undefined>(undefined);
   let editingKey = $state(false);
   /** Set when the user explicitly closes the auto-opened key panel —
    *  first-time visitors can decline to enter a key and still use the
@@ -172,6 +173,7 @@
     if (!apiKey && !keyPanelDismissed) {
       keyDraft = "";
       editingKey = true;
+      focusKeyDraft();
     }
   });
 
@@ -356,6 +358,19 @@
     provider = next;
     model = loadModel(next);
     apiKey = loadKey(next);
+    // an open key panel edits the ACTIVE provider's key — refresh the
+    // draft too, or the previous provider's key would be saved over the
+    // new provider's on the next သိမ်းမည် click
+    if (editingKey) keyDraft = apiKey;
+  }
+
+  /** Focus the key input and select its contents, so typing REPLACES a
+   *  prefilled (masked) key instead of appending to it. */
+  function focusKeyDraft() {
+    requestAnimationFrame(() => {
+      keyInput?.focus();
+      keyInput?.select();
+    });
   }
 
   function openKeyPanel() {
@@ -363,6 +378,7 @@
     keyPanelDismissed = false;
     editingKey = true;
     showInfo = false;
+    focusKeyDraft();
   }
 
   function closeKeyPanel() {
@@ -928,6 +944,7 @@
             id="api-key-input"
             type="password"
             bind:value={keyDraft}
+            bind:this={keyInput}
             placeholder={PROVIDERS[provider].keyPlaceholder}
             spellcheck="false"
             autocomplete="off"
