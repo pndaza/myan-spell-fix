@@ -426,28 +426,8 @@ main > .card:has(.editor, .out, .panels) {
   cursor: pointer;
 }
 
-.chunkinfo:hover,
-.chunkinfo[aria-expanded="true"] {
+.chunkinfo:hover {
   color: var(--accent-ink);
-}
-
-.chunk-note {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  width: max-content;
-  max-width: min(340px, calc(100vw - 60px));
-  z-index: 3;
-  font-family: var(--my);
-  font-size: 12.5px;
-  line-height: 1.7;
-  color: var(--text-dim);
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
-  animation: count-pop-in 0.18s ease;
 }
 
 /* progress */
@@ -592,10 +572,44 @@ main > .card:has(.editor, .out, .panels) {
   color: var(--accent-dim);
 }
 
-/* about/shortcuts card opened from the header info icon */
-.infocard {
-  padding: 14px 18px;
-  margin-bottom: 14px;
+/* about/help popups — native <dialog> modals opened from the header info
+   icon and the chunk-size ⓘ; the browser centers them and paints the
+   backdrop, we only theme the box */
+dialog.mm-dialog {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 16px 18px;
+  max-width: min(460px, calc(100vw - 40px));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+dialog.mm-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+dialog.mm-dialog[open] {
+  animation: dialog-in 0.16s ease;
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dialog-note {
+  font-family: var(--my);
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text-dim);
+  margin: 10px 0 0;
 }
 
 .infohead {

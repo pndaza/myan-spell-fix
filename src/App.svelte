@@ -133,10 +133,12 @@
    *  first-time visitors can decline to enter a key and still use the
    *  editor; the panel stops reopening until they ask for it. */
   let keyPanelDismissed = $state(false);
-  /** About/shortcuts card, opened from the header info icon. */
-  let showInfo = $state(false);
-  /** Explanation bubble beside the chunk-size dropdown. */
-  let chunkNote = $state(false);
+  /** About/shortcuts dialog, opened from the header info icon. Native
+   *  <dialog> modal — the browser supplies centering, backdrop, focus
+   *  trapping and Esc-to-close. */
+  let infoDialog = $state<HTMLDialogElement | undefined>(undefined);
+  /** Chunk-size explanation dialog, opened from the ⓘ beside the dropdown. */
+  let chunkDialog = $state<HTMLDialogElement | undefined>(undefined);
   let phase = $state<Phase>("edit");
   let view = $state<View>("diff");
   let result = $state<string | null>(null);
@@ -377,8 +379,21 @@
     keyDraft = apiKey;
     keyPanelDismissed = false;
     editingKey = true;
-    showInfo = false;
+    // a modal dialog would keep the panel inert underneath it
+    infoDialog?.close();
+    chunkDialog?.close();
     focusKeyDraft();
+  }
+
+  function openInfo() {
+    editingKey = false;
+    chunkDialog?.close();
+    infoDialog?.showModal();
+  }
+
+  function openChunkNote() {
+    infoDialog?.close();
+    chunkDialog?.showModal();
   }
 
   function closeKeyPanel() {
@@ -765,12 +780,9 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    // popovers close first — they overlay whatever phase is active
-    if (e.key === "Escape" && (showInfo || chunkNote)) {
-      showInfo = false;
-      chunkNote = false;
-      return;
-    }
+    // an open modal dialog owns the keyboard — Esc closes it natively and
+    // focus is trapped inside, so page shortcuts must not fire underneath
+    if (infoDialog?.open || chunkDialog?.open) return;
     // Suggest-phase review shortcuts: ↑/↓ move the row cursor (its
     // fragments light up in the text panel), Space toggles, Enter applies.
     if (phase === "suggest") {
@@ -882,13 +894,10 @@
       </button>
       <button
         class="btn icon"
-        onclick={() => {
-          showInfo = !showInfo;
-          if (showInfo) editingKey = false;
-        }}
+        onclick={openInfo}
         title="အချက်အလက် — About, quota & shortcuts"
         aria-label="အချက်အလက် — About, quota and shortcuts"
-        aria-expanded={showInfo}
+        aria-haspopup="dialog"
       >
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
@@ -900,39 +909,6 @@
   </header>
 
   <main>
-    {#if showInfo}
-      <div class="card infocard">
-        <div class="infohead">
-          <span class="infotitle">မြန်မာစာလုံးပြင် — Myan Spell Fix</span>
-          <button class="btn" onclick={() => (showInfo = false)} title="ပိတ်မည် — Close">✕</button>
-        </div>
-        <ul class="infolist">
-          <li>
-            Google Gemini ဖြင့် မြန်မာ စာလုံးပြင်ပေးသည့် ကိရိယာ — စာသားသည်
-            သင့် browser မှ ရွေးထားသော provider သို့သာ တိုက်ရိုက်သွားပါသည်။
-          </li>
-          <li>
-            provider နှစ်ခု — Google AI Studio (အခမဲ့ quota:
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">အခမဲ့ key</a>)
-            သို့မဟုတ် OpenRouter (credit ဖြင့် အသုံးပြု:
-            <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">key ယူပါ</a>)။
-            key ကို browser ထဲတွင်သာ သိမ်းဆည်းပါသည်။
-          </li>
-          <li>
-            Google AI Studio အခမဲ့ quota — Flash-Lite ~500 request/နေ့၊ Flash
-            ~20 request/နေ့။ ခန့်မှန်း request အရေအတွက်ကို အောက်တွင် ပြသည်။
-          </li>
-          <li>
-            chunk အရွယ်အစား — နည်း = request များသည်၊ များ = request နည်းသည်။
-          </li>
-          <li>
-            shortcut — Ctrl/⌘ + Enter = စတင်၊ Esc = ပိတ်/နောက်သို့၊ manual mode
-            တွင် ↑↓ · Space · Enter
-          </li>
-        </ul>
-      </div>
-    {/if}
-
     {#if editingKey && phase === "edit"}
       <div class="card keycard">
         <label class="keylabel" for="api-key-input">
@@ -1059,10 +1035,10 @@
               </select>
               <button
                 class="chunkinfo"
-                onclick={() => (chunkNote = !chunkNote)}
+                onclick={openChunkNote}
                 title="ဘာလဲ — what does this mean?"
                 aria-label="chunk အရွယ်အစား ရှင်းလင်းချက် — chunk size explanation"
-                aria-expanded={chunkNote}
+                aria-haspopup="dialog"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <circle cx="12" cy="12" r="10" />
@@ -1070,16 +1046,6 @@
                   <path d="M12 8h.01" />
                 </svg>
               </button>
-              {#if chunkNote}
-                <div class="chunk-note" role="note">
-                  <b>request တစ်ခုအတွက် ပို့မည့် စာမျက်နှာအရေအတွက်</b>
-                  (စာမျက်နှာ တစ်မျက်နှာကို စာလုံးရေ ၂၀၀၀ ခန့်)
-                  စာမျက်နှာနည်းနည်းချင်းစီ request ပို့က request ပိုကုန်သော်လည်း
-                  စာလုံးပေါင်း အမှား ပြင်ဆင်နိုင်စွမ်း ပိုကောင်းသည်။
-                  စာမျက်နှာများများသုံးပြီး request ပို့က request ချွေတာနိုင်သော်လည်း
-                  အမှားပြင်ဆင်နိုင်စွမ်း လျော့နိုင်သည်။ ချင့်ချိန်၍ သုံးပါ။
-                </div>
-              {/if}
             </div>
             {#if overQuota}
               <span
@@ -1317,3 +1283,65 @@
 <div class="toast" class:show={toast !== null} role="status" aria-live="polite">
   {toast ?? ""}
 </div>
+
+<!-- native <dialog> popups: the browser handles centering, backdrop, focus
+     trapping and Esc-to-close; a click on the backdrop dismisses too -->
+<dialog
+  bind:this={infoDialog}
+  class="mm-dialog"
+  aria-labelledby="info-title"
+  onclick={(e) => {
+    if (e.target === infoDialog) infoDialog?.close();
+  }}
+>
+  <div class="infohead">
+    <span class="infotitle" id="info-title">မြန်မာစာလုံးပြင် — Myan Spell Fix</span>
+    <button class="btn" onclick={() => infoDialog?.close()} title="ပိတ်မည် — Close">✕</button>
+  </div>
+  <ul class="infolist">
+    <li>
+      Google Gemini ဖြင့် မြန်မာ စာလုံးပြင်ပေးသည့် ကိရိယာ — စာသားသည်
+      သင့် browser မှ ရွေးထားသော provider သို့သာ တိုက်ရိုက်သွားပါသည်။
+    </li>
+    <li>
+      provider နှစ်ခု — Google AI Studio (အခမဲ့ quota:
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">အခမဲ့ key</a>)
+      သို့မဟုတ် OpenRouter (credit ဖြင့် အသုံးပြု:
+      <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">key ယူပါ</a>)။
+      key ကို browser ထဲတွင်သာ သိမ်းဆည်းပါသည်။
+    </li>
+    <li>
+      Google AI Studio အခမဲ့ quota — Flash-Lite ~500 request/နေ့၊ Flash
+      ~20 request/နေ့။ ခန့်မှန်း request အရေအတွက်ကို အောက်တွင် ပြသည်။
+    </li>
+    <li>
+      chunk အရွယ်အစား — နည်း = request များသည်၊ များ = request နည်းသည်။
+    </li>
+    <li>
+      shortcut — Ctrl/⌘ + Enter = စတင်၊ Esc = ပိတ်/နောက်သို့၊ manual mode
+      တွင် ↑↓ · Space · Enter
+    </li>
+  </ul>
+</dialog>
+
+<dialog
+  bind:this={chunkDialog}
+  class="mm-dialog"
+  aria-labelledby="chunk-note-title"
+  onclick={(e) => {
+    if (e.target === chunkDialog) chunkDialog?.close();
+  }}
+>
+  <div class="infohead">
+    <span class="infotitle" id="chunk-note-title">chunk အရွယ်အစား</span>
+    <button class="btn" onclick={() => chunkDialog?.close()} title="ပိတ်မည် — Close">✕</button>
+  </div>
+  <p class="dialog-note">
+    <b>request တစ်ခုအတွက် ပို့မည့် စာမျက်နှာအရေအတွက်</b>
+    (စာမျက်နှာ တစ်မျက်နှာကို စာလုံးရေ ၂၀၀၀ ခန့်)
+    စာမျက်နှာနည်းနည်းချင်းစီ request ပို့က request ပိုကုန်သော်လည်း
+    စာလုံးပေါင်း အမှား ပြင်ဆင်နိုင်စွမ်း ပိုကောင်းသည်။
+    စာမျက်နှာများများသုံးပြီး request ပို့က request ချွေတာနိုင်သော်လည်း
+    အမှားပြင်ဆင်နိုင်စွမ်း လျော့နိုင်သည်။ ချင့်ချိန်၍ သုံးပါ။
+  </p>
+</dialog>
